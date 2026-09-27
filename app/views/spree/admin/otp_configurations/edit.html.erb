@@ -1,0 +1,161 @@
+<% content_for :title do %>
+  <%= Spree.t('otp_auth.admin.title', default: 'OTP Authentication Settings') %>
+<% end %>
+
+<% content_for :page_title do %>
+  <%= Spree.t('otp_auth.admin.title', default: 'OTP Authentication Settings') %>
+<% end %>
+
+<div class="grid grid-cols-12 gap-6">
+  <div class="col-span-12 lg:col-span-8 lg:col-start-3">
+    <%= render 'spree/admin/shared/error_messages', target: @otp_configuration %>
+
+    <div class="card mb-6">
+      <div class="card-body flex items-center justify-between">
+        <div>
+          <h5 class="card-title text-base font-semibold text-gray-900 mb-1">
+            Store Context: <%= current_store.name %>
+          </h5>
+          <p class="text-xs text-gray-500 mb-0">
+            Settings configured here are strictly isolated to <strong><%= current_store.name %></strong> (Code: <%= current_store.code %>).
+          </p>
+        </div>
+        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+          <%= current_store.code.upcase %>
+        </span>
+      </div>
+    </div>
+
+    <%= form_with model: @otp_configuration, scope: :otp_configuration, url: spree.admin_otp_configuration_path, method: :patch, id: 'otp-configuration-form' do |f| %>
+      <!-- Channel & Timing Section -->
+      <div class="card mb-6">
+        <div class="card-header border-b border-gray-200 px-6 py-4">
+          <h5 class="card-title text-sm font-semibold text-gray-900">
+            <%= Spree.t('otp_auth.admin.channel_header', default: 'Channel & Template Configuration') %>
+          </h5>
+        </div>
+        <div class="card-body px-6 py-4 space-y-4">
+          <div>
+            <%= f.spree_select :active_channel,
+                  options_for_select([
+                    ['Email OTP (Primary Channel)', 'email'],
+                    ['Mobile SMS OTP (Forward-Looking)', 'mobile'],
+                    ['Direct WhatsApp OTP (Forward-Looking)', 'whatsapp']
+                  ], @otp_configuration.active_channel),
+                  { label: Spree.t('otp_auth.admin.active_channel', default: 'Primary Verification Channel') } %>
+            <p class="text-xs text-gray-500 mt-1">
+              Select the primary verification channel for passwordless login and checkout authentication on this store.
+            </p>
+          </div>
+
+          <div>
+            <%= f.spree_select :fallback_channel,
+                  options_for_select([
+                    ['None (No Fallback)', 'none'],
+                    ['Direct WhatsApp', 'whatsapp'],
+                    ['Mobile SMS', 'sms'],
+                    ['Email', 'email']
+                  ], @otp_configuration.fallback_channel),
+                  { label: Spree.t('otp_auth.admin.fallback_channel', default: 'Fallback Verification Channel') } %>
+            <p class="text-xs text-gray-500 mt-1">
+              Secondary fallback channel if primary OTP delivery is delayed or customer requests alternative delivery.
+            </p>
+          </div>
+
+          <div>
+            <%= f.spree_select :email_template_id,
+                  options_for_select(
+                    [['Default Responsive OTP Mailer', '']] +
+                    Spree::EmailTemplate.where(store_id: [current_store.id, nil]).map { |t| [t.name, t.id] },
+                    @otp_configuration.email_template_id
+                  ),
+                  { label: Spree.t('otp_auth.admin.email_template', default: 'Transactional Email Template') } %>
+            <p class="text-xs text-gray-500 mt-1">
+              Select an email template configured in <a href="/admin/email_templates" class="text-blue-600 hover:underline font-medium" target="_blank">Email Templates</a> with <code>{{otp_code}}</code>, <code>{{store_name}}</code>, and <code>{{expiry_minutes}}</code> variables, or use the built-in responsive mailer.
+            </p>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+            <div>
+              <%= f.spree_select :otp_length,
+                    options_for_select([
+                      ['6 Digits (Recommended)', 6],
+                      ['4 Digits', 4]
+                    ], @otp_configuration.otp_length),
+                    { label: Spree.t('otp_auth.admin.otp_length', default: 'OTP Length') } %>
+            </div>
+            <div>
+              <%= f.spree_number_field :otp_expiry_seconds,
+                    label: Spree.t('otp_auth.admin.otp_expiry_seconds', default: 'OTP Expiry (seconds)'),
+                    min: 60,
+                    step: 10 %>
+              <p class="text-xs text-gray-400 mt-1">Duration before OTP expires (min 60s, default 600s).</p>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <%= f.spree_number_field :resend_cooldown_seconds,
+                    label: Spree.t('otp_auth.admin.resend_cooldown_seconds', default: 'Resend Cooldown (seconds)'),
+                    min: 10,
+                    step: 5 %>
+              <p class="text-xs text-gray-400 mt-1">Wait duration before resend OTP is unlocked (default 30s).</p>
+            </div>
+            <div>
+              <%= f.spree_number_field :fallback_delay_seconds,
+                    label: Spree.t('otp_auth.admin.fallback_delay_seconds', default: 'Fallback Option Delay (seconds)'),
+                    min: 10,
+                    step: 5 %>
+              <p class="text-xs text-gray-400 mt-1">Threshold before secondary fallback option button is displayed (default 20s).</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Provider Credentials Section -->
+      <div class="card mb-6">
+        <div class="card-header border-b border-gray-200 px-6 py-4">
+          <h5 class="card-title text-sm font-semibold text-gray-900">
+            <%= Spree.t('otp_auth.admin.msg91_header', default: 'MSG91 Provider Credentials & DLT Templates') %>
+          </h5>
+        </div>
+        <div class="card-body px-6 py-4 space-y-4">
+          <div>
+            <%= f.spree_text_field :msg91_auth_key,
+                  label: Spree.t('otp_auth.admin.msg91_auth_key', default: 'MSG91 Auth Key'),
+                  value: nil,
+                  placeholder: (@otp_configuration.msg91_auth_key.present? ? '••••••••' : 'Enter MSG91 Auth Key') %>
+            <p class="text-xs text-gray-500 mt-1">
+              Encrypted at rest with ActiveRecord encryption. Leave blank to retain existing key.
+            </p>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <%= f.spree_text_field :msg91_sender_id,
+                    label: Spree.t('otp_auth.admin.msg91_sender_id', default: 'Sender ID (Header)'),
+                    placeholder: 'ONTODI' %>
+              <p class="text-xs text-gray-400 mt-1">6-character DLT registered header.</p>
+            </div>
+            <div>
+              <%= f.spree_text_field :msg91_sms_template_id,
+                    label: Spree.t('otp_auth.admin.msg91_sms_template_id', default: 'SMS Template ID'),
+                    placeholder: 'e.g. 64b8...' %>
+              <p class="text-xs text-gray-400 mt-1">Pre-approved DLT Template ID.</p>
+            </div>
+            <div>
+              <%= f.spree_text_field :msg91_whatsapp_template_id,
+                    label: Spree.t('otp_auth.admin.msg91_whatsapp_template_id', default: 'WhatsApp Template ID'),
+                    placeholder: 'e.g. 65c1...' %>
+              <p class="text-xs text-gray-400 mt-1">Meta/MSG91 Integrated Template ID.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-actions mt-6 flex justify-end">
+        <%= f.submit Spree.t(:update, default: 'Update Settings'), class: 'btn btn-primary' %>
+      </div>
+    <% end %>
+  </div>
+</div>

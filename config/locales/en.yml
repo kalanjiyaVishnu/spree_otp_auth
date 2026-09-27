@@ -1,0 +1,21 @@
+en:
+  spree:
+    admin:
+      tab:
+        otp_authentication: "OTP Authentication"
+    otp_authentication: "OTP Authentication"
+    otp_auth:
+      admin:
+        title: "OTP Authentication Settings"
+        update_success: "OTP authentication settings updated successfully."
+        channel_header: "Channel & Timing Configuration"
+        active_channel: "Active OTP Channel"
+        otp_length: "OTP Length"
+        otp_expiry_seconds: "OTP Expiry (seconds)"
+        resend_cooldown_seconds: "Resend Cooldown (seconds)"
+        fallback_delay_seconds: "WhatsApp Fallback Delay (seconds)"
+        msg91_header: "MSG91 Provider Credentials & DLT Templates"
+        msg91_auth_key: "MSG91 Auth Key"
+        msg91_sender_id: "Sender ID (Header)"
+        msg91_sms_template_id: "SMS Template ID"
+        msg91_whatsapp_template_id: "WhatsApp Template ID"
