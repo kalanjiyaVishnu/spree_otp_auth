@@ -20,8 +20,6 @@ Spree::Core::Engine.add_routes do
   post 'webhooks/gupshup', to: 'webhooks/gupshup#create', as: :gupshup_webhook
 
   namespace :admin do
-    resource :otp_configuration, only: [:edit, :update] do
-      post :test_whatsapp
-    end
+    resource :otp_configuration, only: [:edit, :update]
   end
 end

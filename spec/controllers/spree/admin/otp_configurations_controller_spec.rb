@@ -164,76 +164,63 @@ RSpec.describe 'Admin OTP Configurations', type: :request do
     end
   end
 
-  describe 'WhatsApp (Gupshup) settings' do
+  describe 'WhatsApp provider readiness' do
     before { login_as(admin, scope: :admin_user) }
     after { Warden.test_reset! }
 
-    let(:gupshup_params) do
-      {
-        gupshup_source_number: '91 90000 00001',
-        gupshup_app_name: 'OntodiApp',
-        gupshup_app_id: 'app-123',
-        gupshup_template_name: 'verify_otp',
-        gupshup_template_id: ''
-      }
-    end
-
-    it 'shows the Gupshup fields, email backup toggle and a missing API key' do
+    it 'no longer shows Gupshup fields or a test send' do
       get '/admin/otp_configuration/edit'
 
-      expect(response.body).to include('otp_configuration[gupshup_source_number]')
-      expect(response.body).to include('otp_configuration[gupshup_app_name]')
-      expect(response.body).to include('otp_configuration[gupshup_app_id]')
-      expect(response.body).to include('otp_configuration[gupshup_template_name]')
-      expect(response.body).to include('otp_configuration[gupshup_template_id]')
-      expect(response.body).to include('value="verify_otp"')
-      expect(response.body).to include('otp_configuration[fallback_channel]')
-      expect(response.body).to include('Missing')
-      expect(response.body).to include('test_phone')
+      expect(response).to have_http_status(:ok)
+      expect(response.body).not_to include('otp_configuration[gupshup_')
+      expect(response.body).not_to include('test_phone')
     end
 
-    it 'shows the API key as configured without revealing it, and masks the webhook secret' do
-      allow(Spree::Otp::Provider::GupshupWhatsapp).to receive(:api_key).and_return('live-key-should-not-render')
-      stub_const('ENV', ENV.to_h.merge('GUPSHUP_WEBHOOK_SECRET' => 'abcdef123456wxyz'))
+    it 'says WhatsApp is not set up, lists what is missing and links to the WhatsApp tab' do
+      get '/admin/otp_configuration/edit'
+
+      expect(response.body).to include('Not set up')
+      expect(response.body).to include('API key (GUPSHUP_API_KEY in the server environment)')
+      expect(response.body).to include('/admin/notification_setting/edit?tab=whatsapp')
+    end
+
+    it 'says Ready when Notification Settings has everything' do
+      gupshup_ready_config(store, active_channel: 'email')
+      allow(Spree::Otp::Provider::GupshupWhatsapp).to receive(:api_key).and_return('test-gupshup-key')
 
       get '/admin/otp_configuration/edit'
 
-      expect(response.body).to include('Configured')
-      expect(response.body).not_to include('live-key-should-not-render')
-      expect(response.body).not_to include('abcdef123456wxyz')
-      expect(response.body).to include('/webhooks/gupshup?secret=')
-      expect(response.body).to include('wxyz')
+      expect(response.body).to include('Ready')
+      expect(response.body).not_to include('Not set up')
     end
 
-    it 'saves the Gupshup fields and normalizes the source number' do
-      patch '/admin/otp_configuration', params: { otp_configuration: gupshup_params.merge(active_channel: 'email') }
-
-      expect(response).to redirect_to('/admin/otp_configuration/edit')
-      cfg = Spree::OtpConfiguration.find_by!(store: store)
-      expect(cfg).to have_attributes(gupshup_source_number: '919000000001', gupshup_app_name: 'OntodiApp',
-                                     gupshup_app_id: 'app-123', gupshup_template_name: 'verify_otp',
-                                     gupshup_template_id: nil)
-    end
-
-    it 'refuses to switch to WhatsApp while settings are missing and names each one' do
+    it 'refuses to switch to WhatsApp while settings are missing and says where to fix them' do
       patch '/admin/otp_configuration', params: { otp_configuration: { active_channel: 'whatsapp' } }
 
       expect(response).to have_http_status(:unprocessable_content)
-      expect(response.body).to include('API key (GUPSHUP_API_KEY in the server environment)')
       expect(response.body).to include('source number')
-      expect(response.body).to include('app name')
-      expect(response.body).to include('app ID (or a template ID)')
+      expect(response.body).to include('Set these in Notification Settings → WhatsApp')
     end
 
-    it 'switches to WhatsApp when ready and clears the cached template id' do
+    it 'refuses WhatsApp when the provider is set to none' do
+      gupshup_ready_config(store, active_channel: 'email')
+      gupshup_settings(store).update!(whatsapp_provider: 'none')
       allow(Spree::Otp::Provider::GupshupWhatsapp).to receive(:api_key).and_return('test-gupshup-key')
-      allow(Spree::Otp::Provider::GupshupWhatsapp).to receive(:clear_template_cache).and_call_original
 
-      patch '/admin/otp_configuration', params: { otp_configuration: gupshup_params.merge(active_channel: 'whatsapp', fallback_channel: 'email') }
+      patch '/admin/otp_configuration', params: { otp_configuration: { active_channel: 'whatsapp' } }
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(response.body).to include('WhatsApp provider (choose Gupshup)')
+    end
+
+    it 'switches to WhatsApp when Notification Settings is complete' do
+      gupshup_ready_config(store, active_channel: 'email')
+      allow(Spree::Otp::Provider::GupshupWhatsapp).to receive(:api_key).and_return('test-gupshup-key')
+
+      patch '/admin/otp_configuration', params: { otp_configuration: { active_channel: 'whatsapp', fallback_channel: 'email' } }
 
       expect(response).to redirect_to('/admin/otp_configuration/edit')
-      expect(Spree::OtpConfiguration.find_by!(store: store)).to have_attributes(active_channel: 'whatsapp', fallback_channel: 'email')
-      expect(Spree::Otp::Provider::GupshupWhatsapp).to have_received(:clear_template_cache).with(store)
+      expect(Spree::OtpConfiguration.find_by!(store: store).active_channel).to eq('whatsapp')
     end
 
     it 'turns the email backup off' do
@@ -242,44 +229,10 @@ RSpec.describe 'Admin OTP Configurations', type: :request do
       expect(Spree::OtpConfiguration.find_by!(store: store).fallback_channel).to eq('none')
     end
 
-    describe 'POST /admin/otp_configuration/test_whatsapp' do
-      before { gupshup_ready_config(store) }
+    it 'no longer has a test send route' do
+      post '/admin/otp_configuration/test_whatsapp', params: { test_phone: '9876543210' }
 
-      it 'sends a test message and reports the message id' do
-        stub_gupshup(message_id: 'gs-test-1')
-
-        post '/admin/otp_configuration/test_whatsapp', params: { test_phone: '9876543210' }
-
-        expect(response).to redirect_to('/admin/otp_configuration/edit')
-        expect(response).to have_http_status(:see_other)
-        expect(flash[:success]).to include('+91 98*** **210')
-        expect(flash[:success]).to include('gs-test-1')
-        expect(gupshup_send_requests.size).to eq(1)
-        expect(Spree::OtpAttempt.count).to eq(0)
-      end
-
-      it 'reports the provider reason on failure' do
-        stub_gupshup(templates: [])
-
-        post '/admin/otp_configuration/test_whatsapp', params: { test_phone: '9876543210' }
-
-        expect(flash[:error]).to include('template_not_found')
-      end
-
-      it 'asks for a phone number' do
-        post '/admin/otp_configuration/test_whatsapp', params: { test_phone: '' }
-
-        expect(flash[:error]).to be_present
-      end
-
-      it 'never puts the API key in the flash' do
-        stub_gupshup(api_key: 'secret-key-xyz', send_http_code: 401, send_status: 'error')
-
-        post '/admin/otp_configuration/test_whatsapp', params: { test_phone: '9876543210' }
-
-        expect(flash[:error]).not_to include('secret-key-xyz')
-        expect(flash[:error]).to include('HTTP 401')
-      end
+      expect(response).to have_http_status(:not_found)
     end
   end
 end
