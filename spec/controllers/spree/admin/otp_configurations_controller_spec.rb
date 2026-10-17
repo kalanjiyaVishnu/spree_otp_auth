@@ -114,14 +114,14 @@ RSpec.describe 'Admin OTP Configurations', type: :request do
 
         patch '/admin/otp_configuration', params: {
           otp_configuration: {
-            active_channel: 'whatsapp',
+            active_channel: 'mobile',
             msg91_auth_key: '' # Blank - should retain original_secure_key
           }
         }
 
         expect(response).to redirect_to('/admin/otp_configuration/edit')
         cfg.reload
-        expect(cfg.active_channel).to eq('whatsapp')
+        expect(cfg.active_channel).to eq('mobile')
         expect(cfg.msg91_auth_key).to eq('original_secure_key')
       end
 
@@ -129,7 +129,7 @@ RSpec.describe 'Admin OTP Configurations', type: :request do
         other_store = create(:store, name: 'Other Store', code: 'other', url: 'other.example.com')
         other_cfg = Spree::OtpConfiguration.create!(
           store: other_store,
-          active_channel: 'whatsapp',
+          active_channel: 'email',
           msg91_auth_key: 'other_store_key'
         )
 
@@ -147,7 +147,7 @@ RSpec.describe 'Admin OTP Configurations', type: :request do
         expect(store_a_cfg.msg91_auth_key).to eq('store_a_key')
 
         other_cfg.reload
-        expect(other_cfg.active_channel).to eq('whatsapp')
+        expect(other_cfg.active_channel).to eq('email')
         expect(other_cfg.msg91_auth_key).to eq('other_store_key')
       end
 

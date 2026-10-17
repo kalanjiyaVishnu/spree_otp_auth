@@ -130,15 +130,4 @@ RSpec.describe 'Store API v3 OTP Request', type: :request do
       expect(json_response['error']['code']).to eq('cooldown_active')
     end
   end
-
-  describe 'POST /api/v3/store/otp/whatsapp' do
-    it 'dispatches OTP via whatsapp channel for valid phone' do
-      post '/api/v3/store/otp/whatsapp',
-           params: { identifier: '9876543210' }.to_json,
-           headers: api_key_headers.merge('Content-Type' => 'application/json')
-
-      expect(response).to have_http_status(:ok)
-      expect(json_response['data']['channel']).to eq('whatsapp')
-    end
-  end
 end

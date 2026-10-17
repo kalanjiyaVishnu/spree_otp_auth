@@ -117,4 +117,92 @@ RSpec.describe Spree::Otp::Verify do
       end
     end
   end
+  describe 'mobile-first logins' do
+    let(:mobile) { '+919812345678' }
+
+    def make_attempt(code:, **attrs)
+      salt = Spree::OtpAttempt.generate_salt
+      Spree::OtpAttempt.create!({
+        store: store, identifier: mobile, channel: 'whatsapp', purpose: 'login',
+        code_digest: Spree::OtpAttempt.digest(code, salt), salt: salt, expires_at: 10.minutes.from_now
+      }.merge(attrs))
+    end
+
+    it 'creates the account with the staged email instead of a placeholder' do
+      make_attempt(code: '111111', staged_email: 'fresh@example.com', staged_mobile_number: mobile)
+
+      result = described_class.call(store: store, identifier: mobile, code: '111111')
+
+      expect(result).to be_success
+      user = result.value[:user]
+      expect(user).to have_attributes(email: 'fresh@example.com', mobile_number: mobile)
+      expect(user.mobile_confirmed_at).to be_present
+    end
+
+    it 'replaces a synthetic email on an existing mobile account' do
+      user = create(:user, email: '919812345678@guest.ontodi.local', mobile_number: mobile)
+      make_attempt(code: '111111', user: user, staged_email: 'real@example.com')
+
+      described_class.call(store: store, identifier: mobile, code: '111111')
+
+      expect(user.reload.email).to eq('real@example.com')
+    end
+
+    it 'rejects a code that was superseded by a newer one' do
+      make_attempt(code: '111111').expire!
+      make_attempt(code: '222222')
+
+      expect(described_class.call(store: store, identifier: mobile, code: '111111').value).to eq(:invalid_otp)
+      expect(described_class.call(store: store, identifier: mobile, code: '222222')).to be_success
+    end
+
+    it 'does not confirm the phone when the login finished with an email backup code' do
+      user = create(:user, email: 'asha@example.com', mobile_number: mobile, mobile_confirmed_at: nil)
+      make_attempt(code: '111111', user: user, channel: 'email')
+
+      described_class.call(store: store, identifier: mobile, code: '111111')
+
+      expect(user.reload.mobile_confirmed_at).to be_nil
+    end
+
+    context 'when linking the number to an email-only account' do
+      let!(:email_only) { create(:user, email: 'emailonly@example.com', mobile_number: nil) }
+      let!(:parent) { make_attempt(code: '111111', user: email_only, staged_mobile_number: mobile) }
+      let!(:child) do
+        salt = Spree::OtpAttempt.generate_salt
+        Spree::OtpAttempt.create!(
+          store: store, identifier: 'emailonly@example.com', channel: 'email', purpose: 'link_email',
+          parent_attempt: parent, user: email_only, code_digest: Spree::OtpAttempt.digest('999999', salt),
+          salt: salt, expires_at: parent.expires_at
+        )
+      end
+
+      it 'needs both codes and then attaches the number to that account' do
+        result = described_class.call(store: store, identifier: mobile, code: '111111', email_code: '999999')
+
+        expect(result).to be_success
+        expect(result.value[:user].id).to eq(email_only.id)
+        expect(email_only.reload).to have_attributes(mobile_number: mobile)
+        expect(email_only.mobile_confirmed_at).to be_present
+        expect(child.reload).to be_verified
+      end
+
+      it 'fails without the email code and only counts against the email code' do
+        result = described_class.call(store: store, identifier: mobile, code: '111111', email_code: '000000')
+
+        expect(result.value).to eq(:invalid_email_code)
+        expect(child.reload.attempts_count).to eq(1)
+        expect(parent.reload).to have_attributes(attempts_count: 0, verified_at: nil)
+        expect(email_only.reload.mobile_number).to be_nil
+      end
+
+      it 'fails on a wrong WhatsApp code and only counts against it' do
+        result = described_class.call(store: store, identifier: mobile, code: '000000', email_code: '999999')
+
+        expect(result.value).to eq(:invalid_otp)
+        expect(parent.reload.attempts_count).to eq(1)
+        expect(child.reload.attempts_count).to eq(0)
+      end
+    end
+  end
 end

@@ -5,7 +5,7 @@ module Spree
     module V3
       module Store
         class OtpController < Store::BaseController
-          skip_before_action :authenticate_user, only: [:request_otp, :verify, :resend, :whatsapp]
+          skip_before_action :authenticate_user, only: [:request_otp, :verify, :resend, :fallback, :delivery_status]
           before_action :require_authentication!, only: [:update_mobile]
 
           # POST /api/v3/store/otp/verify
@@ -25,6 +25,7 @@ module Spree
               store: current_store,
               identifier: identifier,
               code: code,
+              email_code: params[:email_code],
               request_env: request_env_for_token
             )
 
@@ -64,6 +65,7 @@ module Spree
               store: current_store,
               identifier: identifier,
               mobile_number: params[:mobile_number],
+              email: params[:email],
               request_env: request_env_for_token
             )
 
@@ -72,7 +74,7 @@ module Spree
             else
               status_code = case result.value
                             when :cooldown_active, :hourly_limit_exceeded then :too_many_requests
-                            when :phone_already_registered then :conflict
+                            when :phone_already_registered, :email_linked_to_other_mobile then :conflict
                             else :unprocessable_entity
                             end
 
@@ -125,9 +127,10 @@ module Spree
             end
           end
 
-          # POST /api/v3/store/otp/whatsapp
-          def whatsapp
-            identifier = params[:identifier]
+          # POST /api/v3/store/otp/fallback
+          # "Send code by email instead" for the latest login attempt.
+          def fallback
+            identifier, = Spree::Otp::Identity.normalize_identifier(params[:identifier])
             if identifier.blank?
               return render_error(
                 code: 'missing_parameter',
@@ -136,22 +139,57 @@ module Spree
               )
             end
 
-            result = Spree::Otp::Resend.call(
-              store: current_store,
-              identifier: identifier,
-              channel: 'whatsapp',
-              request_env: request_env_for_token
-            )
-
-            if result.success?
-              render json: { data: result.value }, status: :ok
-            else
-              render_error(
-                code: result.value.to_s,
-                message: result.error.to_s,
+            attempt = latest_login_attempt(identifier)
+            unless attempt
+              return render_error(
+                code: 'invalid_identifier',
+                message: 'Please request a new code.',
                 status: :unprocessable_entity
               )
             end
+
+            result = Spree::Otp::Fallback.call(store: current_store, attempt: attempt, reason: 'customer_requested', enforce_cooldown: true)
+
+            if result.success?
+              render json: {
+                data: Spree::Otp::CodeSentPayload.build(attempt: result.value[:attempt], config: current_store.effective_otp_configuration)
+              }, status: :ok
+            else
+              status_code = case result.value
+                            when :email_fallback_disabled then :not_found
+                            when :cooldown_active, :hourly_limit_exceeded then :too_many_requests
+                            else :unprocessable_entity
+                            end
+
+              message = result.error.value.is_a?(Hash) ? result.error.value[:message] : result.error.to_s
+              retry_after = result.error.value.is_a?(Hash) ? result.error.value[:retry_after_seconds] : nil
+
+              render_error(code: result.value.to_s, message: message, retry_after_seconds: retry_after, status: status_code)
+            end
+          end
+
+          # POST /api/v3/store/otp/status (body: identifier) — POST keeps the phone out of URLs/logs.
+          # Lets the code screen notice an automatic switch to email (webhook path).
+          def delivery_status
+            identifier, = Spree::Otp::Identity.normalize_identifier(params[:identifier])
+            attempt = identifier.present? ? latest_login_attempt(identifier) : nil
+            unless attempt
+              return render_error(code: 'not_found', message: 'No code in progress.', status: :not_found)
+            end
+
+            previous = Spree::OtpAttempt.where(store: current_store, identifier: identifier).login
+                                        .where('created_at < ?', attempt.created_at)
+                                        .order(created_at: :desc).first
+            fell_back = attempt.channel == 'email' && previous&.delivery_status == 'fallback_sent'
+            destination = Spree::Otp::Delivery.destination_for(attempt)
+
+            render json: {
+              data: {
+                channel: attempt.channel,
+                masked_target: Spree::Otp::Identity.mask(destination.to_s),
+                delivery_status: fell_back ? 'fallback_sent' : attempt.delivery_status
+              }
+            }, status: :ok
           end
 
           # PATCH /api/v3/store/otp/customer/mobile
@@ -243,9 +281,14 @@ module Spree
           end
 
           def normalize_phone(raw)
-            digits = raw.to_s.gsub(/\D/, '')
-            digits = "91#{digits}" if digits.length == 10
-            digits.present? ? "+#{digits}" : ''
+            Spree::Otp::Identity.normalize_phone(raw).to_s
+          end
+
+          # Newest unverified login attempt from the last 15 minutes.
+          def latest_login_attempt(identifier)
+            Spree::OtpAttempt.where(store: current_store, identifier: identifier, verified_at: nil).login
+                             .where('created_at > ?', 15.minutes.ago)
+                             .order(created_at: :desc).first
           end
         end
       end
