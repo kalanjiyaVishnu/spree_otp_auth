@@ -56,7 +56,7 @@ RSpec.describe Spree::Otp::Provider::GupshupWhatsapp do
 
     it 'skips the lookup when a template id override is set' do
       override = '11111111-2222-3333-4444-555555555555'
-      config.update!(gupshup_template_id: override)
+      gupshup_settings(store).update!(gupshup_template_id: override)
 
       provider.send_otp(identifier: '+919876543210', code: code)
 
@@ -130,6 +130,17 @@ RSpec.describe Spree::Otp::Provider::GupshupWhatsapp do
     expect(result.error_message).not_to include('super-secret-key')
     expect(log.string).not_to include(code)
     expect(log.string).not_to include('super-secret-key')
+  end
+
+  it 'refuses to send when the WhatsApp provider is set to none' do
+    stub_gupshup
+    gupshup_settings(store).update!(whatsapp_provider: 'none')
+
+    result = provider.send_otp(identifier: '+919876543210', code: code)
+
+    expect(result).to be_failure
+    expect(result.error_message).to eq('provider_not_configured')
+    expect(gupshup_requests).to be_empty
   end
 
   context 'without GUPSHUP_API_KEY' do

@@ -35,6 +35,8 @@ module Spree
 
         def send_otp(identifier:, code:, metadata: {})
           destination = identifier.to_s.gsub(/\D/, '')
+          return failure('provider_not_configured') unless settings.whatsapp_provider == 'gupshup'
+
           key = self.class.api_key
 
           if key.blank?
@@ -44,7 +46,7 @@ module Spree
             return Result.new(success: true, channel: 'whatsapp', message_id: "sim-gs-#{SecureRandom.hex(8)}")
           end
 
-          return failure('provider_not_configured') if config.gupshup_source_number.blank? || config.gupshup_app_name.blank?
+          return failure('provider_not_configured') if settings.gupshup_source_number.blank? || settings.gupshup_app_name.blank?
 
           template_id = resolve_template_id(key)
           return failure('template_not_found') if template_id.blank?
@@ -77,26 +79,31 @@ module Spree
 
         private
 
+        # Provider details come from Notification Settings → WhatsApp.
+        def settings
+          @settings ||= Spree::Otp::WhatsappSettings.for(store)
+        end
+
         def failure(reason)
           Result.new(success: false, channel: 'whatsapp', error_message: reason)
         end
 
         def resolve_template_id(key)
-          return config.gupshup_template_id if config.gupshup_template_id.present?
-          return nil if config.gupshup_app_id.blank?
+          return settings.gupshup_template_id if settings.gupshup_template_id.present?
+          return nil if settings.gupshup_app_id.blank?
 
-          name = config.effective_gupshup_template_name
+          name = settings.effective_gupshup_template_name
           cache_key = self.class.template_cache_key(store)
           cached = Rails.cache.read(cache_key)
-          return cached[:id] if cached.is_a?(Hash) && cached[:name] == name && cached[:app_id] == config.gupshup_app_id
+          return cached[:id] if cached.is_a?(Hash) && cached[:name] == name && cached[:app_id] == settings.gupshup_app_id
 
           id = lookup_template_id(key, name)
-          Rails.cache.write(cache_key, { name: name, app_id: config.gupshup_app_id, id: id }, expires_in: TEMPLATE_CACHE_TTL) if id
+          Rails.cache.write(cache_key, { name: name, app_id: settings.gupshup_app_id, id: id }, expires_in: TEMPLATE_CACHE_TTL) if id
           id
         end
 
         def lookup_template_id(key, name)
-          path = "/wa/app/#{ERB::Util.url_encode(config.gupshup_app_id)}/template?templateStatus=APPROVED"
+          path = "/wa/app/#{ERB::Util.url_encode(settings.gupshup_app_id)}/template?templateStatus=APPROVED"
           request = Net::HTTP::Get.new(path)
           request['apikey'] = key
 
@@ -114,9 +121,9 @@ module Spree
           request['Content-Type'] = 'application/x-www-form-urlencoded'
           request.body = URI.encode_www_form(
             'channel' => 'whatsapp',
-            'source' => config.gupshup_source_number,
+            'source' => settings.gupshup_source_number,
             'destination' => destination,
-            'src.name' => config.gupshup_app_name,
+            'src.name' => settings.gupshup_app_name,
             'template' => { id: template_id, params: [code.to_s] }.to_json
           )
           perform(request)

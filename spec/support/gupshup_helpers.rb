@@ -64,22 +64,29 @@ module GupshupHelpers
     gupshup_requests.select { |r| r.is_a?(Net::HTTP::Get) }
   end
 
-  def gupshup_ready_config(store, **attrs)
-    cfg = Spree::OtpConfiguration.default_for(store)
-    cfg.assign_attributes(
-      {
-        active_channel: 'whatsapp',
-        fallback_channel: 'email',
-        gupshup_source_number: '919000000001',
-        gupshup_app_name: 'OntodiApp',
-        gupshup_app_id: 'app-123',
-        gupshup_template_name: 'verify_otp'
-      }.merge(attrs)
+  # Gupshup details live in Notification Settings (feature 018); the login
+  # channel and email backup stay on the OTP configuration, which is returned.
+  def gupshup_ready_config(store, **otp_attrs)
+    settings = gupshup_settings(store)
+    settings.assign_attributes(
+      whatsapp_provider: 'gupshup',
+      gupshup_source_number: '919000000001',
+      gupshup_app_name: 'OntodiApp',
+      gupshup_app_id: 'app-123',
+      gupshup_template_name: 'verify_otp'
     )
+    settings.save!(validate: false)
+
+    cfg = Spree::OtpConfiguration.default_for(store)
+    cfg.assign_attributes({ active_channel: 'whatsapp', fallback_channel: 'email' }.merge(otp_attrs))
     # Skip validation: the API key is blanked by default in specs, and the
     # "WhatsApp needs a key" rule has its own coverage.
     cfg.save!(validate: false)
     cfg
+  end
+
+  def gupshup_settings(store)
+    Notification::Setting.for_store(store)
   end
 end
 
