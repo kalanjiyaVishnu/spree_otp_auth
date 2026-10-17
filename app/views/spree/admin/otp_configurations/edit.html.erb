@@ -36,30 +36,34 @@
         </div>
         <div class="card-body px-6 py-4 space-y-4">
           <div>
+            <%
+              channel_options = [
+                ['WhatsApp (Gupshup)', 'whatsapp'],
+                ['Email', 'email']
+              ]
+              # Keep a legacy SMS setting visible so saving doesn't silently change it.
+              channel_options << ['Mobile SMS (MSG91)', 'mobile'] if @otp_configuration.active_channel == 'mobile'
+            %>
             <%= f.spree_select :active_channel,
-                  options_for_select([
-                    ['Email OTP (Primary Channel)', 'email'],
-                    ['Mobile SMS OTP (Forward-Looking)', 'mobile'],
-                    ['Direct WhatsApp OTP (Forward-Looking)', 'whatsapp']
-                  ], @otp_configuration.active_channel),
+                  options_for_select(channel_options, @otp_configuration.active_channel),
                   { label: Spree.t('otp_auth.admin.active_channel', default: 'Primary Verification Channel') } %>
             <p class="text-xs text-gray-500 mt-1">
-              Select the primary verification channel for passwordless login and checkout authentication on this store.
+              Customers sign in with their mobile number. WhatsApp sends the code on WhatsApp; Email sends it to the account's email.
+              Switching to WhatsApp needs the Gupshup settings below. Send a test message first.
             </p>
           </div>
 
-          <div>
-            <%= f.spree_select :fallback_channel,
-                  options_for_select([
-                    ['None (No Fallback)', 'none'],
-                    ['Direct WhatsApp', 'whatsapp'],
-                    ['Mobile SMS', 'sms'],
-                    ['Email', 'email']
-                  ], @otp_configuration.fallback_channel),
-                  { label: Spree.t('otp_auth.admin.fallback_channel', default: 'Fallback Verification Channel') } %>
-            <p class="text-xs text-gray-500 mt-1">
-              Secondary fallback channel if primary OTP delivery is delayed or customer requests alternative delivery.
-            </p>
+          <div class="flex items-start gap-3">
+            <%= f.check_box :fallback_channel,
+                  { checked: @otp_configuration.email_fallback_enabled?, class: 'mt-1 h-4 w-4 rounded border-gray-300' },
+                  'email', 'none' %>
+            <div>
+              <%= f.label :fallback_channel, Spree.t('otp_auth.admin.email_backup', default: 'Email backup'), class: 'text-sm font-medium text-gray-900' %>
+              <p class="text-xs text-gray-500 mb-0">
+                If WhatsApp can't deliver the code, send it to the customer's email automatically, and offer
+                "Send code by email instead" on the code screen after the resend wait.
+              </p>
+            </div>
           </div>
 
           <div>
@@ -112,11 +116,87 @@
         </div>
       </div>
 
+      <!-- WhatsApp via Gupshup -->
+      <div class="card mb-6">
+        <div class="card-header border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+          <h5 class="card-title text-sm font-semibold text-gray-900">
+            <%= Spree.t('otp_auth.admin.gupshup_header', default: 'WhatsApp via Gupshup') %>
+          </h5>
+          <% if @otp_configuration.gupshup_api_key_present? %>
+            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+              <%= Spree.t('otp_auth.admin.gupshup_api_key_status', default: 'API key') %>: Configured
+            </span>
+          <% else %>
+            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+              <%= Spree.t('otp_auth.admin.gupshup_api_key_status', default: 'API key') %>: Missing
+            </span>
+          <% end %>
+        </div>
+        <div class="card-body px-6 py-4 space-y-4">
+          <p class="text-xs text-gray-500 mb-0">
+            The API key is read from <code>GUPSHUP_API_KEY</code> in the server environment and is never stored or shown here.
+          </p>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <%= f.spree_text_field :gupshup_source_number,
+                    label: Spree.t('otp_auth.admin.gupshup_source_number', default: 'Business WhatsApp number'),
+                    placeholder: '919876543210' %>
+              <p class="text-xs text-gray-400 mt-1">The registered WhatsApp Business number, with country code.</p>
+            </div>
+            <div>
+              <%= f.spree_text_field :gupshup_app_name,
+                    label: Spree.t('otp_auth.admin.gupshup_app_name', default: 'Gupshup app name'),
+                    placeholder: 'MyStoreApp' %>
+              <p class="text-xs text-gray-400 mt-1">Sent to Gupshup as <code>src.name</code>.</p>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <%= f.spree_text_field :gupshup_app_id,
+                    label: Spree.t('otp_auth.admin.gupshup_app_id', default: 'Gupshup app ID') %>
+              <p class="text-xs text-gray-400 mt-1">Used to look up the template by name.</p>
+            </div>
+            <div>
+              <%= f.spree_text_field :gupshup_template_name,
+                    label: Spree.t('otp_auth.admin.gupshup_template_name', default: 'Template name'),
+                    value: @otp_configuration.effective_gupshup_template_name %>
+              <p class="text-xs text-gray-400 mt-1">Approved WhatsApp template, e.g. <code>verify_otp</code>.</p>
+            </div>
+            <div>
+              <%= f.spree_text_field :gupshup_template_id,
+                    label: Spree.t('otp_auth.admin.gupshup_template_id', default: 'Template ID (optional)'),
+                    placeholder: 'Leave blank to look up by name' %>
+            </div>
+          </div>
+
+          <div>
+            <p class="text-sm font-medium text-gray-900 mb-1">
+              <%= Spree.t('otp_auth.admin.gupshup_webhook_url', default: 'Delivery callback URL') %>
+            </p>
+            <% webhook_secret = ENV['GUPSHUP_WEBHOOK_SECRET'].to_s %>
+            <% if webhook_secret.present? %>
+              <code class="text-xs break-all"><%= request.base_url %>/webhooks/gupshup?secret=••••••••<%= webhook_secret.last(4) %></code>
+              <p class="text-xs text-gray-400 mt-1">
+                Paste this in your Gupshup app's callback settings, with the full secret from <code>GUPSHUP_WEBHOOK_SECRET</code>.
+                It lets the store switch a code to email when WhatsApp can't deliver it.
+              </p>
+            <% else %>
+              <p class="text-xs text-red-700 mb-0">
+                Set <code>GUPSHUP_WEBHOOK_SECRET</code> in the server environment to enable delivery callbacks.
+              </p>
+            <% end %>
+          </div>
+        </div>
+      </div>
+
       <!-- Provider Credentials Section -->
       <div class="card mb-6">
         <div class="card-header border-b border-gray-200 px-6 py-4">
           <h5 class="card-title text-sm font-semibold text-gray-900">
             <%= Spree.t('otp_auth.admin.msg91_header', default: 'MSG91 Provider Credentials & DLT Templates') %>
+            <span class="text-xs font-normal text-gray-500">(SMS only)</span>
           </h5>
         </div>
         <div class="card-body px-6 py-4 space-y-4">
@@ -130,7 +210,7 @@
             </p>
           </div>
 
-          <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <%= f.spree_text_field :msg91_sender_id,
                     label: Spree.t('otp_auth.admin.msg91_sender_id', default: 'Sender ID (Header)'),
@@ -143,12 +223,6 @@
                     placeholder: 'e.g. 64b8...' %>
               <p class="text-xs text-gray-400 mt-1">Pre-approved DLT Template ID.</p>
             </div>
-            <div>
-              <%= f.spree_text_field :msg91_whatsapp_template_id,
-                    label: Spree.t('otp_auth.admin.msg91_whatsapp_template_id', default: 'WhatsApp Template ID'),
-                    placeholder: 'e.g. 65c1...' %>
-              <p class="text-xs text-gray-400 mt-1">Meta/MSG91 Integrated Template ID.</p>
-            </div>
           </div>
         </div>
       </div>
@@ -157,5 +231,27 @@
         <%= f.submit Spree.t(:update, default: 'Update Settings'), class: 'btn btn-primary' %>
       </div>
     <% end %>
+
+    <!-- Test send (separate form: uses the saved settings) -->
+    <div class="card mt-6">
+      <div class="card-header border-b border-gray-200 px-6 py-4">
+        <h5 class="card-title text-sm font-semibold text-gray-900">
+          <%= Spree.t('otp_auth.admin.test_whatsapp', default: 'Send test WhatsApp') %>
+        </h5>
+      </div>
+      <div class="card-body px-6 py-4">
+        <%= form_with url: spree.test_whatsapp_admin_otp_configuration_path, method: :post, class: 'flex flex-col sm:flex-row gap-3 sm:items-end' do %>
+          <div class="flex-1">
+            <%= label_tag :test_phone, 'Phone number', class: 'text-sm font-medium text-gray-900' %>
+            <%= telephone_field_tag :test_phone, nil, placeholder: '9876543210', class: 'form-control' %>
+          </div>
+          <%= submit_tag Spree.t('otp_auth.admin.test_whatsapp', default: 'Send test WhatsApp'), class: 'btn btn-light' %>
+        <% end %>
+        <p class="text-xs text-gray-500 mt-2 mb-0">
+          Sends the <code><%= @otp_configuration.effective_gupshup_template_name %></code> template with code 123456 using the
+          <strong>saved</strong> settings. Save first if you changed anything above.
+        </p>
+      </div>
+    </div>
   </div>
 </div>
