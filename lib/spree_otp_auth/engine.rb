@@ -8,6 +8,13 @@ module SpreeOtpAuth
       g.test_framework :rspec
     end
 
+    # The verify endpoint takes the one-time code as `code`; keep it out of the
+    # "Parameters:" log lines. Exact match so promo_code, country_code, etc.
+    # stay readable.
+    initializer 'spree_otp_auth.filter_parameters' do |app|
+      app.config.filter_parameters += [/\Acode\z/]
+    end
+
     def self.activate
       Dir.glob(File.join(File.dirname(__FILE__), '../../app/**/*_decorator*.rb')) do |c|
         Rails.configuration.cache_classes ? require(c) : load(c)

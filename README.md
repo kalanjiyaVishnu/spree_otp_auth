@@ -1,74 +1,51 @@
 # spree_otp_auth
 
-Enterprise-grade, passwordless One-Time Password (OTP) authentication engine for Spree Commerce and headless storefronts (Next.js / Store API v3).
+Passwordless One-Time Password (OTP) authentication engine for Spree Commerce and headless storefronts (Next.js / Store API v3).
 
-Designed for modern e-commerce architectures where checkout friction must be minimized while capturing mandatory customer phone numbers for fulfillment, complying with local telecom regulations, and eliminating password reuse vulnerabilities.
+Customers sign in with their mobile number and receive the code on WhatsApp (via Gupshup). Email is the backup channel. News-and-offers consent is captured during login, not at checkout.
 
 ---
 
 ## Features
 
-- **Passwordless Customer Auth**: Pure Email OTP flow via single-field input with adaptive progressive disclosure for mandatory phone capture. No passwords to remember or reset.
-- **Adaptive Progressive Mobile Capture**:
-  - Existing users with verified mobile numbers proceed directly to Email OTP.
-  - New users or accounts missing a phone number are prompted inline for their mobile number before the OTP is dispatched.
-  - Mobile numbers are staged on the OTP attempt and confirmed atomically upon successful 6-digit OTP verification.
-- **Mandatory Login & Phone Gate at Checkout**:
-  - Guest shoppers attempting to check out are redirected to authentication; carts and promotional discounts are merged seamlessly upon login.
-  - Checkout cannot advance to the payment step without a validated, confirmed mobile phone number.
-- **Transactional Email Templates**:
-  - Store-scoped integration with `/admin/email_templates` (`Spree::EmailTemplate`).
-  - Supports dynamic variable interpolation: `{{otp_code}}`, `{{store_name}}`, `{{expiry_minutes}}`.
-  - Automatic fallback to built-in responsive HTML mailer if unassigned or rendering fails.
-- **Store-Scoped Multi-Tenant Configuration**: Every store can independently choose its primary channel (`email`, `mobile`, `whatsapp`), fallback channel policy (`none`, `whatsapp`, `sms`, `email`), email template, code length (4 or 6 digits), expiry windows, and credentials.
-- **Encrypted Credentials at Rest**: MSG91 authentication keys are encrypted using Rails `ActiveRecord::Encryption` and masked (`••••••••`) in the Spree Admin UI.
-- **Strict Cross-Account Mobile Uniqueness**: Prevents two accounts from claiming the same phone number (returns HTTP 409 Conflict).
-- **Production-Ready Rate Limiting**: Built-in sliding-window limiter on request, resend, and verification attempts to eliminate brute-force and spam attacks.
+- **Mobile-first, passwordless login**: the customer enters a mobile number; the code arrives on WhatsApp using the approved `verify_otp` template.
+- **Email collected once**: new numbers, or accounts without a real email (synthetic `…@guest.ontodi.local` addresses count as none), are asked for an email inline before the code is sent.
+- **Safe account linking**: a new number plus the email of an existing email-only account needs both the WhatsApp code and a second code sent to that email. An email already linked to a different mobile is rejected (409).
+- **Email backup** (on by default, admin can turn it off):
+  - automatic when Gupshup rejects the send, or later reports the message `failed` through the delivery callback (for example, number not on WhatsApp);
+  - on demand via "Send code by email instead" after the resend wait.
+  - Not used when linking a number to an email-only account (the WhatsApp code is the proof of the phone).
+- **Only the newest code works**: resends, email-instead and automatic fallback expire the previous code.
+- **News-and-offers consent at login**: ticked by default beside the email field for new customers; shown on the code screen for returning customers who aren't subscribed (unticked if they opted out before); hidden for subscribers.
+- **Store-scoped configuration** in Spree Admin with a test-send button.
+- **Rate limiting**: resend cooldown and 5 codes per number per hour, applied to every channel.
+- **No secrets in the database, admin UI or logs**: the Gupshup key lives only in the environment; codes are stored as salted SHA-256 digests.
 
 ---
 
 ## Architecture Overview
 
 ```
-                      +-----------------------------------+
-                      |      Headless Storefront          |
-                      |  (Next.js / React Design Tokens)  |
-                      +-----------------+-----------------+
-                                        |
-                            Store API v3 REST JSON
-                                        |
-                                        v
-                 +---------------------------------------------+
-                 |            spree_otp_auth Engine            |
-                 |                                             |
-                 |  Controllers:                               |
-                 |   - Spree::Api::V3::Store::OtpController    |
-                 |   - Spree::Admin::OtpConfigurationsController|
-                 |                                             |
-                 |  Services:                                  |
-                 |   - Spree::Otp::Generate                    |
-                 |   - Spree::Otp::Verify                      |
-                 |   - Spree::Otp::Resend                      |
-                 |   - Spree::Otp::RateLimiter                 |
-                 |                                             |
-                 |  Providers:                                 |
-                 |   - Base < Email (Spree::OtpMailer)         |
-                 |   - Base < Msg91Sms                         |
-                 |   - Base < Msg91Whatsapp                    |
-                 +---------------------------------------------+
+Storefront (Next.js)                       spree_otp_auth engine
+--------------------                       -------------------------------------------
+UnifiedAuthForm  ── POST /otp/request ───▶ Spree::Otp::Generate
+OtpVerificationInput                          ├─ Delivery.provider_for(channel)
+  ├─ POST /otp/verify ───────────────────▶   │    ├─ Provider::GupshupWhatsapp ──▶ Gupshup API
+  ├─ POST /otp/resend                        │    ├─ Provider::Email (Spree::OtpMailer)
+  ├─ POST /otp/fallback ─────────────────▶   │    └─ Provider::Msg91Sms (legacy SMS)
+  └─ POST /otp/status (polls ≤60s)           └─ Spree::Otp::Fallback (email backup)
+                                           Spree::Otp::Verify ─▶ Spree::Otp::MarketingConsent
+Gupshup ── POST /webhooks/gupshup?secret= ▶ Spree::Webhooks::GupshupController ─▶ Fallback
+Admin ──── /admin/otp_configuration ─────▶ Spree::Admin::OtpConfigurationsController
 ```
 
 ---
 
 ## Installation
 
-Add this engine to your Spree application's `Gemfile`:
-
 ```ruby
 gem 'spree_otp_auth', path: 'engines/spree_otp_auth'
 ```
-
-Install and run the migrations:
 
 ```bash
 bundle install
@@ -76,170 +53,139 @@ bin/rails g spree_otp_auth:install
 bin/rails db:migrate
 ```
 
-The installer:
-1. Copies database migrations for `spree_otp_configurations` and `spree_otp_attempts`.
-2. Adds `fallback_channel` and `email_template_id` to `spree_otp_configurations`.
-3. Adds `staged_mobile_number` to `spree_otp_attempts`.
-4. Adds `mobile_number` and `mobile_confirmed_at` to `spree_users`.
+Migrations add `spree_otp_configurations` (channels, timings, Gupshup settings), `spree_otp_attempts` (code digests, staged mobile/email, purpose, delivery status, Gupshup message id), and `mobile_number`, `mobile_confirmed_at` and `email_marketing_decided_at` on `spree_users`. The consent migration back-fills customers with a verified newsletter subscription as subscribed.
 
 ---
 
-## Store Configuration & Admin UI
+## Gupshup setup
 
-Navigate to **Spree Admin → Settings → OTP Authentication**:
+### Environment variables
 
-1. **Primary Verification Channel**:
-   - `email`: Sends OTP via email templates (default for current phase).
-   - `mobile`: Sends OTP via SMS using MSG91 DLT templates.
-   - `whatsapp`: Directly sends OTP via WhatsApp.
-2. **Fallback Verification Channel**:
-   - `none`: No fallback.
-   - `whatsapp`: WhatsApp fallback button becomes available after delay.
-   - `sms`: SMS fallback.
-   - `email`: Email fallback.
-3. **Transactional Email Template**:
-   - Select an existing template configured under `/admin/email_templates` (`Spree::EmailTemplate`).
-   - Supports `{{otp_code}}`, `{{store_name}}`, `{{expiry_minutes}}` interpolation.
-   - Default option: built-in responsive OTP mailer.
-4. **Timing Configurations**:
-   - `otp_length`: 6 digits (recommended) or 4 digits.
-   - `otp_expiry_seconds`: Token validity lifetime (minimum 60s, default 600s).
-   - `resend_cooldown_seconds`: Cooldown before resend button activates (default 30s).
-   - `fallback_delay_seconds`: Delay before secondary fallback option displays (default 20s).
-5. **Provider Credentials (MSG91)**:
-   - `MSG91 Auth Key`: Encrypted in database, masked in UI.
-   - `Sender ID`: 6-character registered DLT header (e.g. `ONTODI`).
-   - `SMS OTP Template ID`: DLT approved transactional flow ID.
-   - `WhatsApp OTP Template ID`: Meta/MSG91 integrated template ID.
+| Variable | Purpose |
+|---|---|
+| `GUPSHUP_API_KEY` | Gupshup account API key. Read only from the environment; never stored, shown or logged. Without it, non-production environments simulate delivery and production refuses to send. |
+| `GUPSHUP_WEBHOOK_SECRET` | Random string (`openssl rand -hex 24`) that authenticates Gupshup's delivery callbacks. |
+
+### Steps
+
+1. Approve a WhatsApp **authentication** template named `verify_otp` in Gupshup whose only variable is the code.
+2. Spree Admin → **OTP Authentication**: fill in the business WhatsApp number, Gupshup app name and app ID (template name defaults to `verify_otp`; a template ID can override the lookup). Save with the channel still on **Email**.
+3. Use **Send test WhatsApp**. A success flash shows Gupshup's message ID. If it reports a template or parameter error, the approved template needs more than one variable or a button parameter; fix the template before going live.
+4. Switch the channel to **WhatsApp** and keep **Email backup** on. The switch is refused until every requirement (key, number, app name, app ID or template ID) is present.
+5. In the Gupshup app's callback settings, set:
+
+   ```
+   https://<api-host>/webhooks/gupshup?secret=<GUPSHUP_WEBHOOK_SECRET>
+   ```
+
+   The secret is a query parameter so Rails' `filter_parameters` masks it in logs. Without the callback, only immediate send errors trigger the automatic email backup; customers can still choose "Send code by email instead".
+
+Rollback: set the channel back to **Email**. Codes go to the account's email from the next request, with no deploy.
+
+### How sending works
+
+- `POST https://api.gupshup.io/wa/api/v1/template/msg` (form-encoded, `apikey` header) with `channel=whatsapp`, `source`, `destination`, `src.name` and `template={"id":"<uuid>","params":["<code>"]}`.
+- The template UUID is looked up by name via `GET /wa/app/{app_id}/template` and cached for 12 hours per store; saving the admin form clears the cache.
+- Timeouts are 5 seconds. A `2xx` with `status: "submitted"` means Gupshup accepted the message, not that it was delivered.
+
+---
+
+## Store Configuration (Spree Admin → OTP Authentication)
+
+| Setting | Notes |
+|---|---|
+| Primary channel | WhatsApp (Gupshup) or Email. Legacy Mobile SMS stays listed only if already selected. |
+| Email backup | `fallback_channel` `email` (default) or `none`. |
+| Gupshup number / app name / app ID / template name / template ID | See setup above. |
+| API key status | Configured / Missing, from `GUPSHUP_API_KEY`. |
+| Delivery callback URL | Shown with the secret masked except its last 4 characters. |
+| Email template | Store email template with `{{otp_code}}`, `{{store_name}}`, `{{expiry_minutes}}`, used for email codes; defaults to the built-in mailer. |
+| Timings | Code length (4/6), expiry (≥60s), resend cooldown (≥10s; also when "email instead" unlocks). |
+| MSG91 (SMS only) | Auth key (encrypted), sender ID, SMS template ID. |
 
 ---
 
 ## REST API Reference
 
-All customer endpoints reside under `/api/v3/store/otp`:
+All customer endpoints are under `/api/v3/store/otp` and need the publishable key header. Full contract: `specs/017-whatsapp-otp-marketing-consent/contracts/otp-api-v3.yaml`.
 
-### 1. Request OTP (Adaptive Progressive Disclosure)
-- **URL**: `POST /api/v3/store/otp/request`
-- **Headers**: `X-Spree-Publishable-Key: <key>`, `Content-Type: application/json`
-- **Step 1 (Email submitted without mobile for new/unlinked user)**:
-  ```json
-  { "identifier": "new.user@example.com" }
-  ```
-  **Response (200 OK)**:
-  ```json
-  {
-    "data": {
-      "requires_mobile": true,
-      "message": "Mobile number is required to continue."
-    }
-  }
-  ```
-- **Step 2 (Email submitted with mobile)**:
-  ```json
-  {
-    "identifier": "new.user@example.com",
-    "mobile_number": "+919876543210"
-  }
-  ```
-  **Response (200 OK)**:
-  ```json
-  {
-    "data": {
-      "requires_mobile": false,
-      "channel": "email",
-      "masked_target": "n***r@example.com",
-      "otp_length": 6,
-      "cooldown_seconds": 30,
-      "fallback_available_after_seconds": 20
-    }
-  }
-  ```
-- **Duplicate Phone Collision (409 Conflict)**:
-  ```json
-  {
-    "error": {
-      "code": "phone_already_registered",
-      "message": "This mobile number is already linked to another account."
-    }
-  }
-  ```
+### Request a code — `POST /request`
 
-### 2. Verify OTP
-- **URL**: `POST /api/v3/store/otp/verify`
-- **Body**:
-  ```json
-  {
-    "identifier": "new.user@example.com",
-    "code": "491823"
-  }
-  ```
-- **Response (200 OK)**:
-  ```json
-  {
-    "token": "eyJhbGciOi...",
-    "refresh_token": "rf_...",
-    "user": {
-      "id": "usr_...",
-      "email": "new.user@example.com",
-      "mobile_number": "+919876543210",
-      "mobile_confirmed_at": "2026-09-27T12:00:00Z"
-    }
-  }
-  ```
+```json
+{ "identifier": "9876543210" }
+```
 
-### 3. Resend OTP
-- **URL**: `POST /api/v3/store/otp/resend`
-- **Body**:
-  ```json
-  { "identifier": "shopper@example.com" }
-  ```
-- **Rate Limit Response (429 Too Many Requests)**:
-  ```json
-  {
-    "error": {
-      "code": "cooldown_active",
-      "message": "Please wait 24 seconds before requesting another code.",
-      "retry_after_seconds": 24
-    }
-  }
-  ```
+New number or no real email on the account:
 
-### 4. Trigger WhatsApp Fallback
-- **URL**: `POST /api/v3/store/otp/whatsapp`
-- **Body**:
-  ```json
-  { "identifier": "shopper@example.com" }
-  ```
+```json
+{ "data": { "requires_email": true, "show_marketing_consent": true, "marketing_consent_default": true } }
+```
 
-### 5. Link / Update Mobile Number
-- **URL**: `PATCH /api/v3/store/otp/customer/mobile`
-- **Headers**: `Authorization: Bearer <customer_jwt>`
-- **Body**:
-  ```json
-  { "mobile_number": "9876543210" }
-  ```
-- **Conflict Response (409 Conflict)**:
-  ```json
-  {
-    "error": {
-      "code": "mobile_already_registered",
-      "message": "This mobile number is already linked to another account. Please sign in with that account."
-    }
+Send again with `"email": "new@example.com"`. Code sent:
+
+```json
+{
+  "data": {
+    "requires_email": false,
+    "requires_email_code": false,
+    "channel": "whatsapp",
+    "masked_target": "+91 98*** **210",
+    "masked_email": null,
+    "auto_fallback": false,
+    "otp_length": 6,
+    "cooldown_seconds": 30,
+    "email_fallback_available": true,
+    "show_marketing_consent": false,
+    "marketing_consent_default": true
   }
-  ```
+}
+```
+
+Errors: `409 email_linked_to_other_mobile` / `phone_already_registered`, `422 invalid_phone` / `invalid_email` / `delivery_failed`, `429 cooldown_active` / `hourly_limit_exceeded` (with `retry_after_seconds`).
+
+Identifiers containing `@` keep the older email-first flow (`requires_mobile`).
+
+### Verify — `POST /verify`
+
+```json
+{ "identifier": "9876543210", "code": "491823", "email_code": "120934", "accept_marketing": true }
+```
+
+`email_code` only when `requires_email_code` was true. `accept_marketing` only when the consent box was shown; omit it to leave consent unchanged. Returns `token`, `refresh_token` and `user` (including `accepts_email_marketing`). Errors: `401 invalid_otp` / `invalid_email_code`, `429 max_attempts_exceeded`.
+
+### Resend — `POST /resend`
+
+`{ "identifier": "9876543210" }`. Resends on the latest attempt's channel.
+
+### Email instead — `POST /fallback`
+
+`{ "identifier": "9876543210" }`. Errors: `404 email_fallback_disabled`, `422 no_email_on_account`, `429 cooldown_active`.
+
+### Where did the code go — `POST /status`
+
+`{ "identifier": "9876543210" }` → `{ "data": { "channel": "email", "masked_target": "a***a@example.com", "delivery_status": "fallback_sent" } }`. POST keeps the phone number out of URLs and access logs.
+
+### Link / update mobile — `PATCH /customer/mobile`
+
+Authenticated; unchanged.
+
+### Gupshup callback — `POST /webhooks/gupshup?secret=…`
+
+Handles `message-event` payloads of type `failed` for message IDs the store issued; everything else gets `200` and is ignored. A wrong or missing secret gets `404`.
 
 ---
 
-## Running Test Suite
+## Running the tests
 
 ```bash
-# Run engine RSpec specs (in Docker)
-docker compose exec -e RAILS_ENV=test -e DATABASE_URL=postgres://postgres@postgres:5432/spree_test web bundle exec rspec engines/spree_otp_auth/spec
+# Engine specs (inside the web container)
+docker exec -e RAILS_ENV=test ecom-web-1 bash -lc 'cd /rails && bundle exec rspec engines/spree_otp_auth/spec'
 
-# Run storefront Vitest specs
-cd apps/storefront
-npm test
+# Storefront
+cd apps/storefront && npm test
 ```
+
+Engine specs blank `GUPSHUP_API_KEY` by default and stub Gupshup HTTP (`spec/support/gupshup_helpers.rb`), so they never send real messages even when the container has a real key.
 
 ---
 
