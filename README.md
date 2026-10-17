@@ -69,9 +69,9 @@ Migrations add `spree_otp_configurations` (channels, timings, Gupshup settings),
 ### Steps
 
 1. Approve a WhatsApp **authentication** template named `verify_otp` in Gupshup whose only variable is the code.
-2. Spree Admin → **OTP Authentication**: fill in the business WhatsApp number, Gupshup app name and app ID (template name defaults to `verify_otp`; a template ID can override the lookup). Save with the channel still on **Email**.
-3. Use **Send test WhatsApp**. A success flash shows Gupshup's message ID. If it reports a template or parameter error, the approved template needs more than one variable or a button parameter; fix the template before going live.
-4. Switch the channel to **WhatsApp** and keep **Email backup** on. The switch is refused until every requirement (key, number, app name, app ID or template ID) is present.
+2. Spree Admin → **Notification Settings → WhatsApp** tab: choose **Gupshup** as the provider and fill in the business WhatsApp number, Gupshup app name and app ID (Gupshup dashboard → your WhatsApp app → Settings). The template name defaults to `verify_otp`; a template ID can override the lookup. Save.
+3. On the same tab use **Send Test WhatsApp**. A success flash shows Gupshup's message ID. If it reports a template or parameter error, the approved template needs more than one variable or a button parameter; fix the template before going live.
+4. Spree Admin → **OTP Authentication**: the "WhatsApp provider" row should say **Ready**. Switch the channel to **WhatsApp** and keep **Email backup** on. The switch is refused until every requirement (provider = Gupshup, key, number, app name, app ID or template ID) is present.
 5. In the Gupshup app's callback settings, set:
 
    ```
@@ -90,15 +90,17 @@ Rollback: set the channel back to **Email**. Codes go to the account's email fro
 
 ---
 
-## Store Configuration (Spree Admin → OTP Authentication)
+## Store Configuration
+
+WhatsApp provider details live in **Spree Admin → Notification Settings → WhatsApp** (per store, `Notification::Setting`; read by the engine through `Spree::Otp::WhatsappSettings`): provider (Gupshup / None), Gupshup number, app name, app ID, template name and ID, API key status, masked callback URL, and **Send Test WhatsApp**. The older `gupshup_*` columns on `spree_otp_configurations` are no longer read.
+
+Login choices live in **Spree Admin → OTP Authentication**:
 
 | Setting | Notes |
 |---|---|
 | Primary channel | WhatsApp (Gupshup) or Email. Legacy Mobile SMS stays listed only if already selected. |
 | Email backup | `fallback_channel` `email` (default) or `none`. |
-| Gupshup number / app name / app ID / template name / template ID | See setup above. |
-| API key status | Configured / Missing, from `GUPSHUP_API_KEY`. |
-| Delivery callback URL | Shown with the secret masked except its last 4 characters. |
+| WhatsApp provider | Ready, or Not set up with what's missing; links to Notification Settings → WhatsApp. |
 | Email template | Store email template with `{{otp_code}}`, `{{store_name}}`, `{{expiry_minutes}}`, used for email codes; defaults to the built-in mailer. |
 | Timings | Code length (4/6), expiry (≥60s), resend cooldown (≥10s; also when "email instead" unlocks). |
 | MSG91 (SMS only) | Auth key (encrypted), sender ID, SMS template ID. |
