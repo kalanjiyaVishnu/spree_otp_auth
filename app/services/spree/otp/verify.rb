@@ -8,7 +8,8 @@ module Spree
     class Verify
       prepend Spree::ServiceModule::Base
 
-      def call(store:, identifier:, code:, email_code: nil, request_env: {})
+      # accept_marketing: nil when the news-and-offers box wasn't shown.
+      def call(store:, identifier:, code:, email_code: nil, accept_marketing: nil, request_env: {})
         normalized_identifier, = Spree::Otp::Identity.normalize_identifier(identifier)
         return failure(:invalid_identifier, 'Invalid email or phone number format.') if normalized_identifier.blank?
 
@@ -32,6 +33,7 @@ module Spree
           link_attempt&.mark_verified!
           user = resolve_user(attempt, normalized_identifier)
           attempt.update(user: user) if attempt.user_id.nil?
+          Spree::Otp::MarketingConsent.call(user: user, store: store, accept: accept_marketing)
         end
 
         tokens = issue_tokens(user, request_env)

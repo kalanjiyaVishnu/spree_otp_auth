@@ -12,6 +12,16 @@ module Spree
       base.before_validation :normalize_auth_identifiers
     end
 
+    # :subscribed, :unsubscribed (opted out before) or :undecided (never asked,
+    # or no real email yet). Drives the news-and-offers checkbox at login.
+    def marketing_consent_state
+      return :undecided unless Spree::Otp::Identity.real_email?(email)
+      return :subscribed if accepts_email_marketing
+      return :unsubscribed if respond_to?(:email_marketing_decided_at) && email_marketing_decided_at.present?
+
+      :undecided
+    end
+
     def mobile_confirmed?
       respond_to?(:mobile_confirmed_at) && mobile_confirmed_at.present?
     end

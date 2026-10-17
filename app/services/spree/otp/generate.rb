@@ -93,7 +93,7 @@ module Spree
 
         normalized_email = Spree::Otp::Identity.normalize_email(email)
         if normalized_email.blank?
-          return success(requires_email: true, requires_mobile: false, message: 'Please enter your email address to continue.')
+          return success(Spree::Otp::CodeSentPayload.requires_email(user))
         end
         return failure(:invalid_email, 'Please enter a valid email address.') unless Spree::Otp::Identity.valid_email?(normalized_email)
 

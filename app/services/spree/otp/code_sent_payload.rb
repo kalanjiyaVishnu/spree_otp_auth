@@ -12,6 +12,7 @@ module Spree
         sent_by_email = attempt.channel == 'email'
         target = sent_by_email ? email_destination : attempt.identifier
         child = attempt.link_email_attempt
+        consent = consent_flags(attempt, child, email_destination)
 
         {
           requires_mobile: false,
@@ -25,6 +26,28 @@ module Spree
           cooldown_seconds: config.resend_cooldown_seconds,
           fallback_available_after_seconds: config.fallback_delay_seconds,
           email_fallback_available: !sent_by_email && child.nil? && config.email_fallback_enabled? && email_destination.present?
+        }.merge(consent)
+      end
+
+      # The news-and-offers box is shown once: beside the email field when one
+      # was collected, otherwise on the code screen for returning customers who
+      # aren't subscribed (ticked unless they opted out before).
+      def consent_flags(attempt, child, email_destination)
+        state = attempt.user ? attempt.user.marketing_consent_state : :undecided
+        collected_email_now = attempt.staged_email.present? || child.present?
+        show = !collected_email_now && state != :subscribed && Spree::Otp::Identity.real_email?(email_destination)
+
+        { show_marketing_consent: show, marketing_consent_default: state != :unsubscribed }
+      end
+
+      def requires_email(user)
+        state = user ? user.marketing_consent_state : :undecided
+        {
+          requires_email: true,
+          requires_mobile: false,
+          show_marketing_consent: true,
+          marketing_consent_default: state != :unsubscribed,
+          message: 'Please enter your email address to continue.'
         }
       end
     end

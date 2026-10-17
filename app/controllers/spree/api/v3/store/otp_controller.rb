@@ -26,6 +26,7 @@ module Spree
               identifier: identifier,
               code: code,
               email_code: params[:email_code],
+              accept_marketing: params.key?(:accept_marketing) ? ActiveModel::Type::Boolean.new.cast(params[:accept_marketing]) : nil,
               request_env: request_env_for_token
             )
 
@@ -265,7 +266,8 @@ module Spree
             serialized.merge(
               id: user.prefixed_id,
               mobile_number: user.mobile_number,
-              mobile_confirmed_at: user.mobile_confirmed_at
+              mobile_confirmed_at: user.mobile_confirmed_at,
+              accepts_email_marketing: user.accepts_email_marketing
             )
           end
 
