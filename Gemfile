@@ -12,6 +12,7 @@ gem 'spree_notification_providers', path: '../spree_notification_providers' if F
 
 group :development, :test do
   gem 'pg'
+  gem 'propshaft'
   gem 'rails-controller-testing'
   gem 'spree_dev_tools'
 end
