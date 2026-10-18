@@ -5,7 +5,7 @@ module Spree
     # Sends a fresh login code by email in place of an attempt's WhatsApp code.
     #
     # Used for the automatic backup (immediate send failure in Generate, or a
-    # Gupshup "failed" webhook) and for the customer's "Send code by email
+    # provider's later failure report) and for the customer's "Send code by email
     # instead" link. Only the new code is valid afterwards.
     class Fallback
       prepend Spree::ServiceModule::Base
@@ -70,13 +70,10 @@ module Spree
           end
         end
 
-        result = Spree::Otp::Provider::Email.new(store).send_otp(
-          identifier: email,
-          code: code,
-          metadata: { expiry_minutes: ((config.otp_expiry_seconds || 600) / 60) }
-        )
+        result = Spree::Otp::Delivery.send_email(store: store, to: email, code: code,
+                                                 expiry_minutes: ((config.otp_expiry_seconds || 600) / 60))
 
-        if result.failure?
+        if result.failed?
           new_attempt.update_columns(delivery_status: 'failed', fallback_reason: result.error_message.to_s.truncate(120))
           return failure(:delivery_failed, 'Failed to send the code by email.')
         end

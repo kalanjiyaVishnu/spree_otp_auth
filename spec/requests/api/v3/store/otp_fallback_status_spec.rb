@@ -12,8 +12,7 @@ RSpec.describe 'Store API v3 OTP mobile-first flow', type: :request do
 
   before do
     stub_gupshup
-    allow_any_instance_of(Spree::Otp::Provider::Email).to receive(:send_otp)
-      .and_return(Spree::Otp::Provider::Result.new(success: true, channel: 'email', message_id: 'mail-1'))
+    capture_otp_emails
   end
 
   describe 'POST /api/v3/store/otp/request' do

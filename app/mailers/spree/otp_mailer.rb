@@ -7,12 +7,14 @@ module Spree
       @code = code
       @expiry_minutes = expiry_minutes
 
-      smtp_sender = ENV['SMTP_FROM_ADDRESS'].presence ||
-                    ActionMailer::Base.smtp_settings[:user_name].presence ||
-                    'no-reply@ontodi.com'
+      # Routed through the store's email providers (spree_notification_providers).
+      # The sender is left to the provider: SMTP uses its own from address, so
+      # the code never goes out from an address the SMTP account can't send as.
+      headers['X-Spree-Store-Id'] = store.id.to_s
+      headers['X-Spree-Message-Type'] = 'otp_code'
 
-      from_address = "#{store.name} <#{smtp_sender}>"
-      reply_to_address = store.customer_support_email.presence || store.mail_from_address.presence || smtp_sender
+      from_address = nil
+      reply_to_address = store.customer_support_email.presence || store.mail_from_address.presence
 
       config = store.otp_configuration || (store.respond_to?(:effective_otp_configuration) ? store.effective_otp_configuration : nil)
       template = config&.email_template

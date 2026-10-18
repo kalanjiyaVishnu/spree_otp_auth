@@ -36,38 +36,35 @@
         </div>
         <div class="card-body px-6 py-4 space-y-4">
           <div>
-            <%
-              channel_options = [
-                ['WhatsApp (Gupshup)', 'whatsapp'],
-                ['Email', 'email']
-              ]
-              # Keep a legacy SMS setting visible so saving doesn't silently change it.
-              channel_options << ['Mobile SMS (MSG91)', 'mobile'] if @otp_configuration.active_channel == 'mobile'
-            %>
+            <% channel_options = [['WhatsApp', 'whatsapp'], ['SMS', 'mobile'], ['Email', 'email']] %>
             <%= f.spree_select :active_channel,
                   options_for_select(channel_options, @otp_configuration.active_channel),
                   { label: Spree.t('otp_auth.admin.active_channel', default: 'Primary Verification Channel') } %>
             <p class="text-xs text-gray-500 mt-1">
-              Customers sign in with their mobile number. WhatsApp sends the code on WhatsApp; Email sends it to the account's email.
+              Customers sign in with their mobile number. WhatsApp and SMS send the code to that number; Email sends it to the account's email.
             </p>
           </div>
 
-          <% whatsapp = Spree::Otp::WhatsappSettings.for(current_store) %>
-          <% whatsapp_missing = whatsapp.missing_whatsapp_requirements %>
-          <div class="flex items-start justify-between gap-4 rounded-md border border-gray-200 px-4 py-3">
-            <div>
-              <p class="text-sm font-medium text-gray-900 mb-1">WhatsApp provider</p>
-              <% if whatsapp_missing.empty? %>
-                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">Ready</span>
-                <span class="text-xs text-gray-500 ml-1">Gupshup is set up for this store.</span>
-              <% else %>
-                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">Not set up</span>
-                <span class="text-xs text-gray-500 ml-1">Missing: <%= whatsapp_missing.join(', ') %></span>
-              <% end %>
+          <% %w[whatsapp mobile].each do |otp_channel| %>
+            <% missing = @otp_configuration.missing_requirements(otp_channel) %>
+            <% provider_channel = Spree::Otp::Delivery.provider_channel(otp_channel) %>
+            <div class="flex items-start justify-between gap-4 rounded-md border border-gray-200 px-4 py-3" id="otp-channel-status-<%= otp_channel %>">
+              <div>
+                <p class="text-sm font-medium text-gray-900 mb-1"><%= otp_channel == 'mobile' ? 'SMS' : 'WhatsApp' %> providers</p>
+                <% if missing.empty? %>
+                  <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">Ready</span>
+                  <span class="text-xs text-gray-500 ml-1">
+                    <%= SpreeNotificationProviders.channel_status(current_store, provider_channel).select { |s| s[:status] == :ready }.map { |s| SpreeNotificationProviders.provider(s[:provider_key])&.label }.compact.join(' → ') %>
+                  </span>
+                <% else %>
+                  <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">Not set up</span>
+                  <span class="text-xs text-gray-500 ml-1">Missing: <%= missing.join(', ') %></span>
+                <% end %>
+              </div>
+              <%= link_to 'Notification providers', spree.admin_notification_providers_path(channel: provider_channel),
+                    class: 'text-sm text-blue-600 hover:underline font-medium whitespace-nowrap' %>
             </div>
-            <%= link_to 'Notification Settings → WhatsApp', spree.edit_admin_notification_setting_path(tab: 'whatsapp'),
-                  class: 'text-sm text-blue-600 hover:underline font-medium whitespace-nowrap' %>
-          </div>
+          <% end %>
 
           <div class="flex items-start gap-3">
             <%= f.check_box :fallback_channel,
@@ -76,7 +73,7 @@
             <div>
               <%= f.label :fallback_channel, Spree.t('otp_auth.admin.email_backup', default: 'Email backup'), class: 'text-sm font-medium text-gray-900' %>
               <p class="text-xs text-gray-500 mb-0">
-                If WhatsApp can't deliver the code, send it to the customer's email automatically, and offer
+                If WhatsApp or SMS can't deliver the code, send it to the customer's email automatically, and offer
                 "Send code by email instead" on the code screen after the resend wait.
               </p>
             </div>
@@ -127,42 +124,6 @@
                     min: 10,
                     step: 5 %>
               <p class="text-xs text-gray-400 mt-1">Threshold before secondary fallback option button is displayed (default 20s).</p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Provider Credentials Section -->
-      <div class="card mb-6">
-        <div class="card-header border-b border-gray-200 px-6 py-4">
-          <h5 class="card-title text-sm font-semibold text-gray-900">
-            <%= Spree.t('otp_auth.admin.msg91_header', default: 'MSG91 Provider Credentials & DLT Templates') %>
-            <span class="text-xs font-normal text-gray-500">(SMS only)</span>
-          </h5>
-        </div>
-        <div class="card-body px-6 py-4 space-y-4">
-          <div>
-            <%= f.spree_text_field :msg91_auth_key,
-                  label: Spree.t('otp_auth.admin.msg91_auth_key', default: 'MSG91 Auth Key'),
-                  value: nil,
-                  placeholder: (@otp_configuration.msg91_auth_key.present? ? '••••••••' : 'Enter MSG91 Auth Key') %>
-            <p class="text-xs text-gray-500 mt-1">
-              Encrypted at rest with ActiveRecord encryption. Leave blank to retain existing key.
-            </p>
-          </div>
-
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <%= f.spree_text_field :msg91_sender_id,
-                    label: Spree.t('otp_auth.admin.msg91_sender_id', default: 'Sender ID (Header)'),
-                    placeholder: 'ONTODI' %>
-              <p class="text-xs text-gray-400 mt-1">6-character DLT registered header.</p>
-            </div>
-            <div>
-              <%= f.spree_text_field :msg91_sms_template_id,
-                    label: Spree.t('otp_auth.admin.msg91_sms_template_id', default: 'SMS Template ID'),
-                    placeholder: 'e.g. 64b8...' %>
-              <p class="text-xs text-gray-400 mt-1">Pre-approved DLT Template ID.</p>
             </div>
           </div>
         </div>

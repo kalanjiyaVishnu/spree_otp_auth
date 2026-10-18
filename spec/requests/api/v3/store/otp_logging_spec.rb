@@ -17,12 +17,10 @@ RSpec.describe 'OTP log safety', type: :request do
   let(:sink) { ActiveSupport::Logger.new(log) }
 
   before do
-    gupshup_ready_config(store)
-    stub_gupshup(api_key: gupshup_key, message_id: 'gs-log-1')
-    stub_const('ENV', ENV.to_h.merge('GUPSHUP_WEBHOOK_SECRET' => webhook_secret))
+    gupshup_ready_config(store, api_key: gupshup_key, webhook_secret: webhook_secret)
+    stub_gupshup(message_id: 'gs-log-1')
     allow(Spree::Otp::Generate).to receive(:generate_code).and_return(code, email_code, code, code)
-    allow_any_instance_of(Spree::Otp::Provider::Email).to receive(:send_otp)
-      .and_return(Spree::Otp::Provider::Result.new(success: true, channel: 'email', message_id: 'mail-1'))
+    capture_otp_emails
     create(:user, email: 'emailonly@example.com', mobile_number: nil)
 
     sink.level = :debug

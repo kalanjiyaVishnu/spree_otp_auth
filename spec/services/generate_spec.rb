@@ -12,17 +12,7 @@ RSpec.describe Spree::Otp::Generate do
     described_class.call(store: store, identifier: mobile, **args)
   end
 
-  def email_provider_calls
-    @email_provider_calls ||= []
-  end
-
-  before do
-    calls = email_provider_calls
-    allow_any_instance_of(Spree::Otp::Provider::Email).to receive(:send_otp) do |_provider, identifier:, code:, metadata: {}|
-      calls << { identifier: identifier, code: code }
-      Spree::Otp::Provider::Result.new(success: true, channel: 'email', message_id: "mail-#{calls.size}")
-    end
-  end
+  let!(:email_provider_calls) { capture_otp_emails }
 
   context 'when the number belongs to an account with a real email' do
     let!(:user) { create(:user, email: 'asha@example.com', mobile_number: normalized_mobile) }
@@ -38,7 +28,30 @@ RSpec.describe Spree::Otp::Generate do
       attempt = Spree::OtpAttempt.last
       expect(attempt).to have_attributes(identifier: normalized_mobile, channel: 'whatsapp', purpose: 'login',
                                          delivery_status: 'submitted', provider_message_id: 'gs-1', user: user)
+      expect(attempt.delivery_message_ref).to be_present
+      expect(Spree::NotificationDelivery.where(message_ref: attempt.delivery_message_ref).pluck(:provider_key, :outcome))
+        .to eq([%w[gupshup delivered]])
       expect(gupshup_send_requests.size).to eq(1)
+    end
+
+    it 'does not resend or switch to email when the send may have gone out' do
+      stub_gupshup(send_status: :timeout)
+
+      result = call
+
+      expect(result).to be_success
+      expect(result.value).to include(channel: 'whatsapp')
+      expect(Spree::OtpAttempt.last).to have_attributes(channel: 'whatsapp', delivery_status: 'pending')
+      expect(email_provider_calls).to be_empty
+    end
+
+    it 'falls back to email when no WhatsApp provider is set up' do
+      remove_gupshup(store)
+
+      result = call
+
+      expect(result.value).to include(channel: 'email', auto_fallback: true)
+      expect(email_provider_calls.size).to eq(1)
     end
 
     it 'expires the previous unverified code when a new one is sent' do

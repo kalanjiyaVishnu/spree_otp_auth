@@ -54,26 +54,29 @@ module Spree
           return failure(:no_email_on_account, 'There is no email on this account to send a code to.')
         end
 
-        dispatch_result = Spree::Otp::Delivery.provider_for(active_channel, store).send_otp(
-          identifier: destination,
-          code: code,
-          metadata: { expiry_minutes: ((config.otp_expiry_seconds || 600) / 60) }
+        outcome = Spree::Otp::Delivery.deliver(
+          channel: active_channel, store: store, attempt: attempt, destination: destination, code: code,
+          expiry_minutes: ((config.otp_expiry_seconds || 600) / 60)
         )
 
         auto_fallback = false
-        if dispatch_result.failure?
-          attempt.update_columns(delivery_status: 'failed', fallback_reason: dispatch_result.error_message.to_s.truncate(120))
+        if outcome.failed?
+          attempt.update_columns(delivery_status: 'failed', fallback_reason: outcome.error_message.to_s.truncate(120),
+                                 delivery_message_ref: outcome.message_ref)
 
-          fallback = try_email_fallback(store, config, attempt, dispatch_result.error_message, linking: context[:link_user].present?)
+          fallback = try_email_fallback(store, config, attempt, outcome.error_message, linking: context[:link_user].present?)
           if fallback&.success?
             attempt = fallback.value[:attempt]
             auto_fallback = true
           else
             attempt.destroy # Clean up unsent attempt so cooldown isn't unfairly triggered
-            return failure(:delivery_failed, dispatch_result.error_message || 'Failed to deliver passcode.')
+            return failure(:delivery_failed, outcome.error_message || 'Failed to deliver passcode.')
           end
         else
-          attempt.update_columns(delivery_status: 'submitted', provider_message_id: dispatch_result.message_id)
+          # :unknown may still have gone out, so it is not resent or switched to
+          # email here; a later provider failure report triggers the backup.
+          attempt.update_columns(delivery_status: outcome.sent? ? 'submitted' : 'pending',
+                                 provider_message_id: outcome.message_id, delivery_message_ref: outcome.message_ref)
         end
 
         if context[:link_user]
@@ -180,12 +183,9 @@ module Spree
           user_agent: request_env[:user_agent]&.truncate(255)
         )
 
-        result = Spree::Otp::Provider::Email.new(store).send_otp(
-          identifier: child.identifier,
-          code: code,
-          metadata: { expiry_minutes: ((config.otp_expiry_seconds || 600) / 60) }
-        )
-        if result.failure?
+        result = Spree::Otp::Delivery.send_email(store: store, to: child.identifier, code: code,
+                                                 expiry_minutes: ((config.otp_expiry_seconds || 600) / 60))
+        if result.failed?
           attempt.destroy
           return failure(:delivery_failed, 'Failed to send the code to your email.')
         end

@@ -13,6 +13,10 @@ module Spree
 
     alias_attribute :auth_channel, :active_channel
 
+    # Legacy provider columns (msg91_*, gupshup_*) are read only by the
+    # one-time import into spree_notification_providers and are dropped in a
+    # later release. Providers, credentials and templates now live in
+    # Admin -> Settings -> Notification providers.
     encrypts :msg91_auth_key, deterministic: false
 
     validates :store_id, uniqueness: true, presence: true
@@ -22,36 +26,26 @@ module Spree
     validates :otp_expiry_seconds, numericality: { greater_than_or_equal_to: 60 }
     validates :resend_cooldown_seconds, numericality: { greater_than_or_equal_to: 10 }
     validates :fallback_delay_seconds, numericality: { greater_than_or_equal_to: 10 }
-    validate :whatsapp_requirements_met, if: -> { active_channel == 'whatsapp' }
+    validate :active_channel_ready, if: -> { %w[whatsapp mobile].include?(active_channel) }
 
-    def effective_msg91_auth_key
-      msg91_auth_key.presence || ENV.fetch('MSG91_AUTH_KEY', nil)
+    # What still stops the store sending login codes on `channel`, as labels.
+    def missing_requirements(channel = active_channel)
+      return [] if channel.to_s == 'email'
+
+      provider_channel = Spree::Otp::Delivery.provider_channel(channel)
+      statuses = SpreeNotificationProviders.channel_status(store, provider_channel)
+      return ["#{channel.to_s == 'mobile' ? 'an' : 'a'} #{channel_name(channel)} provider"] if statuses.empty?
+      return [] if Spree::Otp::Delivery.ready?(store, channel)
+
+      enabled = statuses.reject { |s| s[:status] == :disabled }
+      return ["an enabled #{channel_name(channel)} provider"] if enabled.empty?
+
+      missing = enabled.flat_map { |s| s[:missing] }.uniq
+      missing.presence || ['a "Login code" template']
     end
 
-    def effective_msg91_sms_template_id
-      msg91_sms_template_id.presence || ENV.fetch('MSG91_SMS_OTP_TEMPLATE_ID', nil)
-    end
-
-    def effective_msg91_whatsapp_template_id
-      msg91_whatsapp_template_id.presence || ENV.fetch('MSG91_WHATSAPP_OTP_TEMPLATE_ID', nil)
-    end
-
-    def effective_msg91_sender_id
-      msg91_sender_id.presence || ENV.fetch('MSG91_SENDER_ID', 'ONTODI')
-    end
-
-    # WhatsApp provider details live in Notification Settings → WhatsApp
-    # (feature 018). The gupshup_* columns on this table are no longer used.
-    def whatsapp_settings
-      Spree::Otp::WhatsappSettings.for(store)
-    end
-
-    def missing_whatsapp_requirements
-      whatsapp_settings.missing_whatsapp_requirements
-    end
-
-    def whatsapp_ready?
-      missing_whatsapp_requirements.empty?
+    def channel_ready?(channel = active_channel)
+      missing_requirements(channel).empty?
     end
 
     def email_fallback_enabled?
@@ -71,11 +65,16 @@ module Spree
 
     private
 
-    def whatsapp_requirements_met
-      missing = missing_whatsapp_requirements
+    def active_channel_ready
+      missing = missing_requirements
       return if missing.empty?
 
-      errors.add(:active_channel, "can't be WhatsApp yet. Missing: #{missing.join(', ')}. Set these in Notification Settings → WhatsApp.")
+      errors.add(:active_channel, "can't be #{channel_name(active_channel)} yet. Missing: #{missing.join(', ')}. " \
+                                  'Set this up in Settings → Notification providers.')
+    end
+
+    def channel_name(channel)
+      channel.to_s == 'mobile' ? 'SMS' : channel.to_s.titleize.sub('Whatsapp', 'WhatsApp')
     end
   end
 end

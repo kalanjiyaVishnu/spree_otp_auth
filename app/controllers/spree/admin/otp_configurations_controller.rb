@@ -13,8 +13,6 @@ module Spree
         authorize! :manage, Spree::OtpConfiguration
 
         attrs = otp_configuration_params
-        # Retain existing encrypted key if blank value submitted
-        attrs.delete(:msg91_auth_key) if attrs[:msg91_auth_key].blank?
         attrs[:email_template_id] = nil if attrs[:email_template_id].blank?
 
         if @otp_configuration.update(attrs)
@@ -44,11 +42,7 @@ module Spree
           :otp_length,
           :otp_expiry_seconds,
           :resend_cooldown_seconds,
-          :fallback_delay_seconds,
-          :msg91_auth_key,
-          :msg91_sms_template_id,
-          :msg91_whatsapp_template_id,
-          :msg91_sender_id
+          :fallback_delay_seconds
         )
       end
     end
