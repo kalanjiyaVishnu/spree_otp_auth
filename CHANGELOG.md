@@ -5,7 +5,7 @@ All notable changes to this gem are documented here. The format follows
 [Semantic Versioning](https://semver.org/). While the version is 0.x, a minor
 bump may change the public API; such changes are listed under **Breaking**.
 
-## 0.2.0 — Unreleased
+## 0.2.0 — 2026-10-19
 
 ### Breaking
 
