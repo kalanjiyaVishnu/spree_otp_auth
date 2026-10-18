@@ -26,6 +26,7 @@ Gem::Specification.new do |spec|
   spec.add_dependency 'spree', '>= 5.5'
   spec.add_dependency 'spree_core', '>= 5.5'
   spec.add_dependency 'spree_api', '>= 5.5'
+  spec.add_dependency 'spree_notification_providers', '~> 0.1'
   spec.add_dependency 'spree_admin', '>= 5.5'
 
   spec.metadata['rubygems_mfa_required'] = 'true'

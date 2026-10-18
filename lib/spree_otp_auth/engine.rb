@@ -15,6 +15,13 @@ module SpreeOtpAuth
       app.config.filter_parameters += [/\Acode\z/]
     end
 
+    # OTP codes go out through spree_notification_providers; the code's
+    # provider-side template is entered per provider under "Login code".
+    initializer 'spree_otp_auth.message_types' do
+      SpreeNotificationProviders.register_message_type :otp_code,
+                                                       label: 'Login code', channels: %i[email sms whatsapp]
+    end
+
     def self.activate
       Dir.glob(File.join(File.dirname(__FILE__), '../../app/**/*_decorator*.rb')) do |c|
         Rails.configuration.cache_classes ? require(c) : load(c)
