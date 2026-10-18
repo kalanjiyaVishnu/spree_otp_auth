@@ -8,8 +8,9 @@ Gem::Specification.new do |spec|
   spec.authors     = ['ONTODI']
   spec.summary     = 'Passwordless multi-channel OTP authentication and login-gated checkout for Spree Commerce'
   spec.description = <<~DESC.strip
-    Provides mandatory login-gated checkout, passwordless customer authentication,
-    swappable OTP channels (Email, MSG91 SMS, and WhatsApp), and store-scoped admin configuration.
+    Provides mandatory login-gated checkout, passwordless customer authentication over WhatsApp,
+    SMS or email with an automatic email backup, and store-scoped admin configuration. Codes are
+    delivered through spree_notification_providers, so any provider and priority order works.
   DESC
   spec.license = 'BSD-3-Clause'
 
@@ -18,6 +19,8 @@ Gem::Specification.new do |spec|
   spec.files = Dir[
     '{app,config,db,lib}/**/*',
     'README.md',
+    'CHANGELOG.md',
+    'LICENSE',
     'spree_otp_auth.gemspec'
   ]
   spec.require_paths = ['lib']
@@ -29,5 +32,9 @@ Gem::Specification.new do |spec|
   spec.add_dependency 'spree_notification_providers', '~> 0.1'
   spec.add_dependency 'spree_admin', '>= 5.5'
 
+  spec.homepage = 'https://github.com/ontodi/spree_otp_auth'
+  spec.metadata['homepage_uri'] = spec.homepage
+  spec.metadata['source_code_uri'] = spec.homepage
+  spec.metadata['changelog_uri'] = "#{spec.homepage}/blob/main/CHANGELOG.md"
   spec.metadata['rubygems_mfa_required'] = 'true'
 end

@@ -2,40 +2,41 @@
 
 Passwordless One-Time Password (OTP) authentication engine for Spree Commerce and headless storefronts (Next.js / Store API v3).
 
-Customers sign in with their mobile number and receive the code on WhatsApp (via Gupshup). Email is the backup channel. News-and-offers consent is captured during login, not at checkout.
+Customers sign in with their mobile number and receive the code on WhatsApp or SMS; email is the backup channel. Codes are delivered through [spree_notification_providers](../spree_notification_providers/README.md), so the store chooses the providers (Gupshup, MSG91, or its own) and their priority there. News-and-offers consent is captured during login, not at checkout.
 
 ---
 
 ## Features
 
-- **Mobile-first, passwordless login**: the customer enters a mobile number; the code arrives on WhatsApp using the approved `verify_otp` template.
-- **Email collected once**: new numbers, or accounts without a real email (synthetic `…@guest.ontodi.local` addresses count as none), are asked for an email inline before the code is sent.
-- **Safe account linking**: a new number plus the email of an existing email-only account needs both the WhatsApp code and a second code sent to that email. An email already linked to a different mobile is rejected (409).
+- **Mobile-first, passwordless login**: the customer enters a mobile number; the code arrives on the store's chosen channel (WhatsApp, SMS or email).
+- **Any provider, in priority order**: delivery goes through spree_notification_providers. A provider that definitely fails moves the code to the next one; a send that may have gone out is never repeated.
+- **Email collected once**: new numbers, or accounts without a real email (synthetic `…<SpreeOtpAuth.synthetic_email_domain>` addresses count as none), are asked for an email inline before the code is sent.
+- **Safe account linking**: a new number plus the email of an existing email-only account needs both the phone code and a second code sent to that email. An email already linked to a different mobile is rejected (409).
 - **Email backup** (on by default, admin can turn it off):
-  - automatic when Gupshup rejects the send, or later reports the message `failed` through the delivery callback (for example, number not on WhatsApp);
+  - automatic when no provider can send the code, or when a provider later reports it `failed` (for example, number not on WhatsApp);
   - on demand via "Send code by email instead" after the resend wait.
-  - Not used when linking a number to an email-only account (the WhatsApp code is the proof of the phone).
+  - Not used when linking a number to an email-only account (the phone code is the proof of the phone).
 - **Only the newest code works**: resends, email-instead and automatic fallback expire the previous code.
 - **News-and-offers consent at login**: ticked by default beside the email field for new customers; shown on the code screen for returning customers who aren't subscribed (unticked if they opted out before); hidden for subscribers.
-- **Store-scoped configuration** in Spree Admin with a test-send button.
+- **Store-scoped configuration** in Spree Admin.
 - **Rate limiting**: resend cooldown and 5 codes per number per hour, applied to every channel.
-- **No secrets in the database, admin UI or logs**: the Gupshup key lives only in the environment; codes are stored as salted SHA-256 digests.
+- **No codes in the database or logs**: codes are stored as salted SHA-256 digests; provider secrets are stored encrypted by spree_notification_providers.
 
 ---
 
 ## Architecture Overview
 
 ```
-Storefront (Next.js)                       spree_otp_auth engine
---------------------                       -------------------------------------------
+Storefront (Next.js)                       spree_otp_auth                       spree_notification_providers
+--------------------                       --------------------------------     ----------------------------
 UnifiedAuthForm  ── POST /otp/request ───▶ Spree::Otp::Generate
-OtpVerificationInput                          ├─ Delivery.provider_for(channel)
-  ├─ POST /otp/verify ───────────────────▶   │    ├─ Provider::GupshupWhatsapp ──▶ Gupshup API
-  ├─ POST /otp/resend                        │    ├─ Provider::Email (Spree::OtpMailer)
-  ├─ POST /otp/fallback ─────────────────▶   │    └─ Provider::Msg91Sms (legacy SMS)
-  └─ POST /otp/status (polls ≤60s)           └─ Spree::Otp::Fallback (email backup)
-                                           Spree::Otp::Verify ─▶ Spree::Otp::MarketingConsent
-Gupshup ── POST /webhooks/gupshup?secret= ▶ Spree::Webhooks::GupshupController ─▶ Fallback
+OtpVerificationInput                          └─ Spree::Otp::Delivery ─────────▶ deliver(type: :otp_code)
+  ├─ POST /otp/verify ───────────────────▶ Spree::Otp::Verify                     ├─ Gupshup / MSG91 / …
+  ├─ POST /otp/resend                                                             └─ Delivery log
+  ├─ POST /otp/fallback ─────────────────▶ Spree::Otp::Fallback ─▶ Spree::OtpMailer (deliver_later)
+  └─ POST /otp/status (polls ≤60s)
+Provider callback ─────────────────────────────────────────────────────────────▶ notification.delivery_failed
+                                           Spree::Otp::DeliveryFailedSubscriber ◀┘ (email backup)
 Admin ──── /admin/otp_configuration ─────▶ Spree::Admin::OtpConfigurationsController
 ```
 
@@ -43,67 +44,59 @@ Admin ──── /admin/otp_configuration ─────▶ Spree::Admin::Otp
 
 ## Installation
 
+Install spree_notification_providers first (this gem depends on it), then:
+
 ```ruby
-gem 'spree_otp_auth', path: 'engines/spree_otp_auth'
+gem 'spree_notification_providers', '~> 0.1'
+gem 'spree_otp_auth', '~> 0.2'
 ```
 
 ```bash
 bundle install
+bin/rails g spree_notification_providers:install
 bin/rails g spree_otp_auth:install
 bin/rails db:migrate
 ```
 
-Migrations add `spree_otp_configurations` (channels, timings, Gupshup settings), `spree_otp_attempts` (code digests, staged mobile/email, purpose, delivery status, Gupshup message id), and `mobile_number`, `mobile_confirmed_at` and `email_marketing_decided_at` on `spree_users`. The consent migration back-fills customers with a verified newsletter subscription as subscribed.
+Migrations add `spree_otp_configurations` (channels and timings), `spree_otp_attempts` (code digests, staged mobile/email, purpose, delivery status, provider message id and delivery reference), and `mobile_number`, `mobile_confirmed_at` and `email_marketing_decided_at` on `spree_users`. The consent migration back-fills customers with a verified newsletter subscription as subscribed.
+
+Set the placeholder email domain for accounts created from a mobile number alone (default `@guest.example.invalid`):
+
+```ruby
+# config/initializers/spree_otp_auth.rb
+SpreeOtpAuth.synthetic_email_domain = '@guest.example.local'
+```
 
 ---
 
-## Gupshup setup
+## Delivery providers
 
-### Environment variables
+This gem registers the `otp_code` message type ("Login code"). Configure the providers in **Spree Admin → Settings → Notification providers**:
 
-| Variable | Purpose |
-|---|---|
-| `GUPSHUP_API_KEY` | Gupshup account API key. Read only from the environment; never stored, shown or logged. Without it, non-production environments simulate delivery and production refuses to send. |
-| `GUPSHUP_WEBHOOK_SECRET` | Random string (`openssl rand -hex 24`) that authenticates Gupshup's delivery callbacks. |
+1. **WhatsApp** tab: add Gupshup (or MSG91), fill in its inputs and, under *Templates*, the **Login code** template (for Gupshup, an approved authentication template whose only variable is the code, by name or UUID). Use **Send test**, then enable it.
+2. **SMS** tab (optional): add MSG91 with the DLT-approved OTP template as **Login code**.
+3. Order providers per channel; the next one is tried only when a provider definitely did not take the code.
+4. For Gupshup delivery callbacks, set the provider's **Webhook secret** and point the Gupshup app at `https://<api-host>/webhooks/gupshup?secret=<webhook secret>`. Without callbacks, only immediate send failures trigger the automatic email backup.
 
-### Steps
-
-1. Approve a WhatsApp **authentication** template named `verify_otp` in Gupshup whose only variable is the code.
-2. Spree Admin → **Notification Settings → WhatsApp** tab: choose **Gupshup** as the provider and fill in the business WhatsApp number, Gupshup app name and app ID (Gupshup dashboard → your WhatsApp app → Settings). The template name defaults to `verify_otp`; a template ID can override the lookup. Save.
-3. On the same tab use **Send Test WhatsApp**. A success flash shows Gupshup's message ID. If it reports a template or parameter error, the approved template needs more than one variable or a button parameter; fix the template before going live.
-4. Spree Admin → **OTP Authentication**: the "WhatsApp provider" row should say **Ready**. Switch the channel to **WhatsApp** and keep **Email backup** on. The switch is refused until every requirement (provider = Gupshup, key, number, app name, app ID or template ID) is present.
-5. In the Gupshup app's callback settings, set:
-
-   ```
-   https://<api-host>/webhooks/gupshup?secret=<GUPSHUP_WEBHOOK_SECRET>
-   ```
-
-   The secret is a query parameter so Rails' `filter_parameters` masks it in logs. Without the callback, only immediate send errors trigger the automatic email backup; customers can still choose "Send code by email instead".
+Then **Spree Admin → OTP Authentication**: each channel shows **Ready** or what is missing, with a link to its providers. Switching the primary channel to WhatsApp or SMS is refused until a provider can send login codes.
 
 Rollback: set the channel back to **Email**. Codes go to the account's email from the next request, with no deploy.
-
-### How sending works
-
-- `POST https://api.gupshup.io/wa/api/v1/template/msg` (form-encoded, `apikey` header) with `channel=whatsapp`, `source`, `destination`, `src.name` and `template={"id":"<uuid>","params":["<code>"]}`.
-- The template UUID is looked up by name via `GET /wa/app/{app_id}/template` and cached for 12 hours per store; saving the admin form clears the cache.
-- Timeouts are 5 seconds. A `2xx` with `status: "submitted"` means Gupshup accepted the message, not that it was delivered.
 
 ---
 
 ## Store Configuration
 
-WhatsApp provider details live in **Spree Admin → Notification Settings → WhatsApp** (per store, `Notification::Setting`; read by the engine through `Spree::Otp::WhatsappSettings`): provider (Gupshup / None), Gupshup number, app name, app ID, template name and ID, API key status, masked callback URL, and **Send Test WhatsApp**. The older `gupshup_*` columns on `spree_otp_configurations` are no longer read.
-
-Login choices live in **Spree Admin → OTP Authentication**:
+**Spree Admin → OTP Authentication** (per store):
 
 | Setting | Notes |
 |---|---|
-| Primary channel | WhatsApp (Gupshup) or Email. Legacy Mobile SMS stays listed only if already selected. |
+| Primary channel | WhatsApp, SMS or Email. |
 | Email backup | `fallback_channel` `email` (default) or `none`. |
-| WhatsApp provider | Ready, or Not set up with what's missing; links to Notification Settings → WhatsApp. |
+| Channel status | Ready, or Not set up with what's missing; links to Notification providers. |
 | Email template | Store email template with `{{otp_code}}`, `{{store_name}}`, `{{expiry_minutes}}`, used for email codes; defaults to the built-in mailer. |
-| Timings | Code length (4/6), expiry (≥60s), resend cooldown (≥10s; also when "email instead" unlocks). |
-| MSG91 (SMS only) | Auth key (encrypted), sender ID, SMS template ID. |
+| Timings | Code length (4/6), expiry (≥60s), resend cooldown (≥10s; also when "email instead" unlocks), fallback option delay. |
+
+Provider credentials and templates are not stored here. The old `msg91_*` / `gupshup_*` columns are read only by the 0.2 upgrade import and are dropped in a later version.
 
 ---
 
@@ -171,26 +164,27 @@ Identifiers containing `@` keep the older email-first flow (`requires_mobile`).
 
 Authenticated; unchanged.
 
-### Gupshup callback — `POST /webhooks/gupshup?secret=…`
+### Delivery failure reports
 
-Handles `message-event` payloads of type `failed` for message IDs the store issued; everything else gets `200` and is ignored. A wrong or missing secret gets `404`.
+Provider callbacks (for example Gupshup's `POST /webhooks/gupshup?secret=…`) are handled by spree_notification_providers, which publishes `notification.delivery_failed`. This gem subscribes to it and sends the email backup.
 
 ---
 
 ## Running the tests
 
 ```bash
-# Engine specs (inside the web container)
+# Inside the host app's web container
 docker exec -e RAILS_ENV=test ecom-web-1 bash -lc 'cd /rails && bundle exec rspec engines/spree_otp_auth/spec'
 
-# Storefront
-cd apps/storefront && npm test
+# Standalone (generates spec/dummy with spree_dev_tools)
+bundle exec rake test_app
+bundle exec rspec
 ```
 
-Engine specs blank `GUPSHUP_API_KEY` by default and stub Gupshup HTTP (`spec/support/gupshup_helpers.rb`), so they never send real messages even when the container has a real key.
+Specs stub provider HTTP through `SpreeNotificationProviders::Http` (`spec/support/gupshup_helpers.rb`), so they never send real messages.
 
 ---
 
 ## License
 
-Released under the [MIT License](LICENSE).
+Released under the [BSD 3-Clause License](LICENSE).

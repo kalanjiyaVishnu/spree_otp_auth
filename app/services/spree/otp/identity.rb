@@ -4,12 +4,17 @@ module Spree
   module Otp
     # Phone/email normalisation and masking shared by the OTP services and
     # controllers. Mobile-created accounts carry a synthetic
-    # "<digits>@guest.ontodi.local" email, which counts as "no email".
+    # "<digits><SpreeOtpAuth.synthetic_email_domain>" email, which counts as
+    # "no email".
     module Identity
       PHONE_FORMAT = /\A\+[1-9]\d{9,14}\z/
-      SYNTHETIC_EMAIL_DOMAIN = '@guest.ontodi.local'
 
       module_function
+
+      def synthetic_email_domain
+        domain = SpreeOtpAuth.synthetic_email_domain.to_s.downcase
+        domain.start_with?('@') ? domain : "@#{domain}"
+      end
 
       def normalize_phone(raw)
         digits = raw.to_s.gsub(/\D/, '')
@@ -36,11 +41,11 @@ module Spree
       end
 
       def real_email?(email)
-        email.present? && !email.to_s.downcase.end_with?(SYNTHETIC_EMAIL_DOMAIN)
+        email.present? && !email.to_s.downcase.end_with?(synthetic_email_domain)
       end
 
       def synthetic_email_for(mobile)
-        "#{mobile.to_s.gsub(/\D/, '')}#{SYNTHETIC_EMAIL_DOMAIN}"
+        "#{mobile.to_s.gsub(/\D/, '')}#{synthetic_email_domain}"
       end
 
       # Returns [normalized, 'email' | 'mobile'] or [nil, nil].

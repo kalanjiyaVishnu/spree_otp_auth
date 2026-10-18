@@ -6,7 +6,6 @@ module Spree
     has_prefix_id :otp_cfg
 
     belongs_to :store, class_name: 'Spree::Store'
-    belongs_to :email_template, class_name: 'Spree::EmailTemplate', optional: true
 
     CHANNELS = %w[email mobile whatsapp].freeze
     FALLBACK_CHANNELS = %w[none whatsapp sms email].freeze
@@ -46,6 +45,17 @@ module Spree
 
     def channel_ready?(channel = active_channel)
       missing_requirements(channel).empty?
+    end
+
+    # The admin-chosen email template, when the app provides a template model
+    # (SpreeOtpAuth.email_template_class).
+    def email_template
+      model = SpreeOtpAuth.email_template_model
+      model && email_template_id.present? ? model.find_by(id: email_template_id) : nil
+    end
+
+    def email_template=(template)
+      self.email_template_id = template&.id
     end
 
     def email_fallback_enabled?

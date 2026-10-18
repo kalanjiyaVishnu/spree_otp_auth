@@ -1,0 +1,7 @@
+/spec/dummy
+/coverage
+/pkg
+*.gem
+Gemfile.lock
+.bundle
+.rspec_status

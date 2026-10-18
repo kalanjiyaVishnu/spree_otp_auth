@@ -79,11 +79,14 @@
             </div>
           </div>
 
+          <% template_model = SpreeOtpAuth.email_template_model %>
+          <% if template_model %>
+          <% email_templates = template_model.column_names.include?('store_id') ? template_model.where(store_id: [current_store.id, nil]) : template_model.all %>
           <div>
             <%= f.spree_select :email_template_id,
                   options_for_select(
                     [['Default Responsive OTP Mailer', '']] +
-                    Spree::EmailTemplate.where(store_id: [current_store.id, nil]).map { |t| [t.name, t.id] },
+                    email_templates.map { |t| [t.name, t.id] },
                     @otp_configuration.email_template_id
                   ),
                   { label: Spree.t('otp_auth.admin.email_template', default: 'Transactional Email Template') } %>
@@ -91,6 +94,7 @@
               Select an email template configured in <a href="/admin/email_templates" class="text-blue-600 hover:underline font-medium" target="_blank">Email Templates</a> with <code>{{otp_code}}</code>, <code>{{store_name}}</code>, and <code>{{expiry_minutes}}</code> variables, or use the built-in responsive mailer.
             </p>
           </div>
+          <% end %>
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
             <div>
