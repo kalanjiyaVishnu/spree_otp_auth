@@ -100,7 +100,7 @@ RSpec.describe 'Store API v3 OTP mobile-first flow', type: :request do
   end
 
   it 'returns 422 from fallback when the account has no email' do
-    create(:user, email: '919876543210@guest.ontodi.local', mobile_number: '+919876543210')
+    create(:user, email: "919876543210#{Spree::Otp::Identity.synthetic_email_domain}", mobile_number: '+919876543210')
     salt = Spree::OtpAttempt.generate_salt
     Spree::OtpAttempt.create!(store: store, identifier: '+919876543210', channel: 'whatsapp',
                               code_digest: Spree::OtpAttempt.digest('111111', salt), salt: salt,

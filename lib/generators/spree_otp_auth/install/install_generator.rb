@@ -9,8 +9,10 @@ module SpreeOtpAuth
 
       class_option :migrate, type: :boolean, default: true, banner: 'Run migrations'
 
+      # spree_otp_auth sends codes through spree_notification_providers, so its
+      # tables are installed too (already-copied migrations are skipped).
       def add_migrations
-        run 'bundle exec rake railties:install:migrations FROM=spree_otp_auth'
+        run 'bundle exec rake railties:install:migrations FROM=spree_notification_providers,spree_otp_auth'
       end
 
       def run_migrations

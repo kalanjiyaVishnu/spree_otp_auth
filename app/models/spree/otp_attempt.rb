@@ -9,7 +9,7 @@ module Spree
     has_prefix_id :otp_att
 
     belongs_to :store, class_name: 'Spree::Store'
-    belongs_to :user, class_name: 'Spree::User', optional: true
+    belongs_to :user, class_name: Spree.user_class.to_s, optional: true
     belongs_to :parent_attempt, class_name: 'Spree::OtpAttempt', optional: true
     has_one :link_email_attempt, class_name: 'Spree::OtpAttempt', foreign_key: :parent_attempt_id,
                                  inverse_of: :parent_attempt, dependent: :destroy

@@ -23,6 +23,8 @@ RSpec.describe Spree::OtpMailer, type: :mailer do
     end
 
     context 'with a configured Spree::EmailTemplate' do
+      prepend_before { skip 'needs an app email template model' unless SpreeOtpAuth.email_template_model }
+
       let!(:template) do
         Spree::EmailTemplate.create!(
           store: store,

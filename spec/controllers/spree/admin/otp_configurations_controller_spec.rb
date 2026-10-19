@@ -8,6 +8,7 @@ RSpec.describe 'Admin OTP Configurations', type: :request do
 
   context 'when unauthenticated' do
     it 'redirects to admin login' do
+      skip 'needs the host app\'s admin authentication' unless defined?(Devise)
       get '/admin/otp_configuration/edit'
       expect(response).to redirect_to('/admin_user/sign_in')
     end
@@ -29,6 +30,7 @@ RSpec.describe 'Admin OTP Configurations', type: :request do
       end
 
       it 'prefills existing configuration for the store' do
+        skip 'needs an app email template model' unless SpreeOtpAuth.email_template_model
         template = Spree::EmailTemplate.create!(
           store: store,
           name: 'Custom OTP Email',
@@ -50,6 +52,7 @@ RSpec.describe 'Admin OTP Configurations', type: :request do
 
     describe 'PATCH /admin/otp_configuration' do
       it 'updates OTP configuration for current_store including fallback and template' do
+        skip 'needs an app email template model' unless SpreeOtpAuth.email_template_model
         template = Spree::EmailTemplate.create!(store: store, name: 'Updated Template', slug: 'updated_template',
                                                 subject: 'Code {{otp_code}}', body_html: '<h1>{{otp_code}}</h1>')
 

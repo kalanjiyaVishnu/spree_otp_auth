@@ -43,7 +43,7 @@ RSpec.describe Spree::Otp::MarketingConsent do
   end
 
   it 'never subscribes a synthetic email' do
-    synthetic = create(:user, email: '919876543210@guest.ontodi.local')
+    synthetic = create(:user, email: "919876543210#{Spree::Otp::Identity.synthetic_email_domain}")
 
     call(true, for_user: synthetic)
 

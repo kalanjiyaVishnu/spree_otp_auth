@@ -262,12 +262,14 @@ module Spree
           end
 
           def serialize_user(user)
-            serialized = user_serializer.new(user, params: serializer_params).to_h
+            # Serializers return string or symbol keys depending on the Spree
+            # version; normalize so the extra fields replace rather than duplicate.
+            serialized = user_serializer.new(user, params: serializer_params).to_h.stringify_keys
             serialized.merge(
-              id: user.prefixed_id,
-              mobile_number: user.mobile_number,
-              mobile_confirmed_at: user.mobile_confirmed_at,
-              accepts_email_marketing: user.accepts_email_marketing
+              'id' => user.prefixed_id,
+              'mobile_number' => user.mobile_number,
+              'mobile_confirmed_at' => user.mobile_confirmed_at,
+              'accepts_email_marketing' => user.accepts_email_marketing
             )
           end
 

@@ -147,7 +147,7 @@ RSpec.describe Spree::Otp::Generate do
 
   context 'when the account only has a synthetic email' do
     before do
-      create(:user, email: '919876543210@guest.ontodi.local', mobile_number: normalized_mobile)
+      create(:user, email: "919876543210#{Spree::Otp::Identity.synthetic_email_domain}", mobile_number: normalized_mobile)
       stub_gupshup
     end
 

@@ -140,7 +140,7 @@ RSpec.describe Spree::Otp::Verify do
     end
 
     it 'replaces a synthetic email on an existing mobile account' do
-      user = create(:user, email: '919812345678@guest.ontodi.local', mobile_number: mobile)
+      user = create(:user, email: "919812345678#{Spree::Otp::Identity.synthetic_email_domain}", mobile_number: mobile)
       make_attempt(code: '111111', user: user, staged_email: 'real@example.com')
 
       described_class.call(store: store, identifier: mobile, code: '111111')
