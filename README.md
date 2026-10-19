@@ -2,7 +2,7 @@
 
 Passwordless One-Time Password (OTP) authentication engine for Spree Commerce and headless storefronts (Next.js / Store API v3).
 
-Customers sign in with their mobile number and receive the code on WhatsApp or SMS; email is the backup channel. Codes are delivered through [spree_notification_providers](../spree_notification_providers/README.md), so the store chooses the providers (Gupshup, MSG91, or its own) and their priority there. News-and-offers consent is captured during login, not at checkout.
+Customers sign in with their mobile number and receive the code on WhatsApp or SMS; email is the backup channel. Codes are delivered through [spree_notification_providers](https://github.com/kalanjiyaVishnu/spree_notification_providers), so the store chooses the providers (Gupshup, MSG91, or its own) and their priority there. News-and-offers consent is captured during login, not at checkout.
 
 ---
 
